@@ -8,17 +8,32 @@ import { useTheme } from 'next-themes';
 export const Navbar: React.FC = () => {
   const [mounted, setMounted] = useState(false);
   const { theme, setTheme } = useTheme();
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '';
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  const handleNavClick = (e: React.MouseEvent<HTMLAnchorElement>, targetId: string) => {
+    const currentPath = window.location.pathname.replace(/\/$/, '');
+    const homePath = basePath.replace(/\/$/, '');
+
+    if (currentPath === homePath || currentPath === '' || currentPath === '/') {
+      e.preventDefault();
+      const el = document.getElementById(targetId);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        window.history.pushState(null, '', `${basePath}/#${targetId}`);
+      }
+    }
+  };
 
   return (
     <header className="sticky top-0 z-50 h-16 w-full border-b border-neutral-200 bg-white/80 dark:border-neutral-800 dark:bg-black/80 backdrop-blur-md">
       <div className="mx-auto flex h-full max-w-6xl items-center justify-between px-4 sm:px-6">
         {/* Left Section: Brand & Nav Links */}
         <div className="flex items-center gap-8">
-          <Link href="/" className="group flex items-center gap-2.5 transition-opacity hover:opacity-90">
+          <Link href={`${basePath}/`} className="group flex items-center gap-2.5 transition-opacity hover:opacity-90">
             <div className="relative flex h-5 w-5 items-center justify-center rounded border border-black bg-white dark:border-white dark:bg-black transition-transform duration-300 group-hover:scale-105">
               <span className="h-2 w-2 rounded-xs bg-black dark:bg-white" />
             </div>
@@ -33,16 +48,28 @@ export const Navbar: React.FC = () => {
 
           {/* Navigation Links */}
           <nav className="hidden items-center gap-6 font-sans text-xs font-medium tracking-wide text-neutral-500 dark:text-neutral-400 md:flex">
-            <Link href="/#workspace" className="transition-colors hover:text-black dark:hover:text-white">
+            <a
+              href={`${basePath}/#workspace`}
+              onClick={(e) => handleNavClick(e, 'workspace')}
+              className="transition-colors hover:text-black dark:hover:text-white cursor-pointer"
+            >
               Workspace
-            </Link>
-            <Link href="/#how-it-works" className="transition-colors hover:text-black dark:hover:text-white">
+            </a>
+            <a
+              href={`${basePath}/#how-it-works`}
+              onClick={(e) => handleNavClick(e, 'how-it-works')}
+              className="transition-colors hover:text-black dark:hover:text-white cursor-pointer"
+            >
               How It Works
-            </Link>
-            <Link href="/#capabilities" className="transition-colors hover:text-black dark:hover:text-white">
+            </a>
+            <a
+              href={`${basePath}/#capabilities`}
+              onClick={(e) => handleNavClick(e, 'capabilities')}
+              className="transition-colors hover:text-black dark:hover:text-white cursor-pointer"
+            >
               Capabilities
-            </Link>
-            <Link href="/dashboard" className="flex items-center gap-1.5 transition-colors hover:text-black dark:hover:text-white">
+            </a>
+            <Link href={`${basePath}/dashboard`} className="flex items-center gap-1.5 transition-colors hover:text-black dark:hover:text-white">
               <History className="h-3.5 w-3.5" />
               History
             </Link>
