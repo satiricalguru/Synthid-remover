@@ -20,7 +20,10 @@
 
 ## 🌐 Live Website
 
-🌐 **Try the Live Application**: [https://satiricalguru.github.io/Synthid-remover/](https://satiricalguru.github.io/Synthid-remover/)
+🌐 **Try the Live Application Demo**: [https://satiricalguru.github.io/Synthid-remover/](https://satiricalguru.github.io/Synthid-remover/)
+
+> [!IMPORTANT]
+> **Demo Notice**: The live website hosted on GitHub Pages is provided as an interactive browser demonstration. For maximum processing performance, full high-resolution Sharp native pipelines, and complete features, we recommend running the application **locally on your machine** following the [Quick Start](#-quick-start) guide below.
 
 ---
 
