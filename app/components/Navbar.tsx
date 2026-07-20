@@ -53,8 +53,9 @@ export const Navbar: React.FC = () => {
         <div className="flex items-center gap-2.5">
 
           <a
-            href="#"
-            onClick={(e) => e.preventDefault()}
+            href="https://github.com/satiricalguru/synthid-remover"
+            target="_blank"
+            rel="noopener noreferrer"
             className="flex h-8 w-8 items-center justify-center rounded-md border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 transition-all hover:border-black hover:bg-black hover:text-white dark:hover:border-white dark:hover:bg-white dark:hover:text-black cursor-pointer"
             aria-label="GitHub Repository"
             title="GitHub Repository"
