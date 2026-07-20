@@ -4,7 +4,7 @@ import { Navbar } from './components/Navbar';
 import { ThemeProvider } from './components/ThemeProvider';
 
 export const metadata: Metadata = {
-  title: 'SynthID Remover | AI Watermark Remover & Metadata Stripper',
+  title: 'Realtime SynthID Remover | AI Watermark Remover & Metadata Stripper',
   description:
     '100% Free, Private local AI watermark remover. Strip EXIF, XMP, C2PA Content Credentials metadata, inpaint visible marks, and disrupt Google SynthID frequency signals.',
   keywords: [
