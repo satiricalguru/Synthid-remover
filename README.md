@@ -24,24 +24,37 @@
 
 ---
 
-## 📸 Screenshots
+## ⚡ Realtime SynthID Removal
 
 <p align="center">
-  <img src="public/hero-comparison.gif" width="100%" alt="Realtime SynthID Scanner Animation" />
+  <img src="public/hero-comparison.gif" width="100%" alt="Realtime SynthID Removal Animation" />
   <br />
   <em>Realtime Reverse Alpha Blending & SynthID frequency signal disruption scanner.</em>
 </p>
 
-<!-- 
-  📸 USER SCREENSHOTS PLACEHOLDER
-  Add your website screenshots below when ready:
-  <p align="center">
-    <img src="public/screenshots/workspace.png" width="100%" alt="Local Workspace View" />
-  </p>
-  <p align="center">
-    <img src="public/screenshots/dashboard.png" width="100%" alt="Job History Dashboard" />
-  </p>
--->
+---
+
+## 📸 Screenshots
+
+### 1. Hero & Live Preview Scanner
+<p align="center">
+  <img src="public/screenshots/hero.png" width="100%" alt="Hero Section & Live Preview Scanner" />
+</p>
+
+### 2. Local Image Processing Workspace
+<p align="center">
+  <img src="public/screenshots/workspace.png" width="100%" alt="Local Image Processing Workspace" />
+</p>
+
+### 3. How It Works & Capabilities
+<p align="center">
+  <img src="public/screenshots/how-it-works.png" width="100%" alt="How It Works & Capabilities" />
+</p>
+
+### 4. Frequently Asked Questions
+<p align="center">
+  <img src="public/screenshots/faq.png" width="100%" alt="Frequently Asked Questions" />
+</p>
 
 ---
 
@@ -73,7 +86,7 @@ Unlike cloud converters, **your images never touch a remote server**. Everything
 | **Language** | [TypeScript](https://www.typescriptlang.org/) |
 | **Styling** | [Tailwind CSS](https://tailwindcss.com/) |
 | **Image Processing** | [Sharp](https://sharp.pixelplumbing.com/) & [`@pilio/gemini-watermark-remover`](https://github.com/GargantuaX/gemini-watermark-remover) |
-| **Deployment** | [GitHub Pages](https://satiricalguru.github.io/synthid-remover/) (GitHub Actions) |
+| **Deployment** | [GitHub Pages](https://satiricalguru.github.io/Synthid-remover/) (GitHub Actions) |
 
 ---
 
@@ -87,8 +100,8 @@ Unlike cloud converters, **your images never touch a remote server**. Everything
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/satiricalguru/synthid-remover.git
-   cd synthid-remover
+   git clone https://github.com/satiricalguru/Synthid-remover.git
+   cd Synthid-remover
    ```
 
 2. Install dependencies:
