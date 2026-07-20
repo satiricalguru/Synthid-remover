@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="public/logo.svg" width="96" height="96" alt="SynthID Remover Logo" />
+  <img src="public/logo.svg" width="96" height="96" alt="Realtime SynthID Remover Logo" />
 </p>
 
-<h1 align="center">SynthID Remover</h1>
+<h1 align="center">Realtime SynthID Remover</h1>
 
 <p align="center">
   <strong>🔒 Remove AI Watermarks, C2PA Content Credentials & Google SynthID Signals 100% Locally.</strong>
@@ -27,17 +27,27 @@
 ## 📸 Screenshots
 
 <p align="center">
-  <img src="public/hero-watermarked.jpg" width="48%" alt="Original Gemini Watermark" />
-  <img src="public/hero-cleaned.jpg" width="48%" alt="Cleaned Output via Reverse Alpha Blending" />
+  <img src="public/hero-comparison.gif" width="100%" alt="Realtime SynthID Scanner Animation" />
   <br />
-  <em>Left: Original image with bottom-right Gemini sparkle badge & embedded SynthID signal.<br />Right: Output after 1-pass Reverse Alpha Blending, EXIF wiping, and frequency signal disruption.</em>
+  <em>Realtime Reverse Alpha Blending & SynthID frequency signal disruption scanner.</em>
 </p>
+
+<!-- 
+  📸 USER SCREENSHOTS PLACEHOLDER
+  Add your website screenshots below when ready:
+  <p align="center">
+    <img src="public/screenshots/workspace.png" width="100%" alt="Local Workspace View" />
+  </p>
+  <p align="center">
+    <img src="public/screenshots/dashboard.png" width="100%" alt="Job History Dashboard" />
+  </p>
+-->
 
 ---
 
 ## 🌟 Overview
 
-**SynthID Remover** is a privacy-first web application designed to erase visible AI watermarks, wipe embedded metadata headers, and neutralize spatial frequency watermarks (such as Google SynthID) completely on your local device.
+**Realtime SynthID Remover** is a privacy-first web application designed to erase visible AI watermarks, wipe embedded metadata headers, and neutralize spatial frequency watermarks (such as Google SynthID) completely on your local device.
 
 Unlike cloud converters, **your images never touch a remote server**. Everything is processed in local memory using standard Web APIs, Sharp pixel matrices, and mathematically exact Reverse Alpha Blending algorithms.
 
