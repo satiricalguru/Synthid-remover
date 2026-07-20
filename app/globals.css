@@ -1,0 +1,127 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --fg: #ffffff;
+  --fg-muted: #8f8f8f;
+  --bg-onyx: #0a0a0a;
+  --bg-pitch: #000000;
+  --border-subtle: #262626;
+  --font-sans: 'Geist', 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background-color: var(--bg-pitch);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0a0a;
+}
+::-webkit-scrollbar-thumb {
+  background: #262626;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #404040;
+}
+
+/* Background Grid Pattern */
+.bg-grid-pattern {
+  background-color: transparent;
+  background-image: radial-gradient(rgba(0, 0, 0, 0.15) 1.2px, transparent 1.2px);
+  background-size: 24px 24px;
+}
+
+.dark .bg-grid-pattern {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.15) 1.2px, transparent 1.2px);
+}
+
+/* Glow Utilities */
+.glow-white {
+  box-shadow: 0 0 20px rgba(255, 255, 255, 0.15);
+}
+
+.glow-border {
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+/* Animated Hero Background Keyframes */
+@keyframes floatSlow {
+  0%, 100% {
+    transform: translate(0px, 0px) scale(1);
+  }
+  33% {
+    transform: translate(40px, -60px) scale(1.12);
+  }
+  66% {
+    transform: translate(-30px, 30px) scale(0.92);
+  }
+}
+
+@keyframes floatReverse {
+  0%, 100% {
+    transform: translate(0px, 0px) scale(1);
+  }
+  33% {
+    transform: translate(-50px, 45px) scale(1.08);
+  }
+  66% {
+    transform: translate(35px, -40px) scale(0.94);
+  }
+}
+
+@keyframes gridPan {
+  0% {
+    background-position: 0px 0px;
+  }
+  100% {
+    background-position: 48px 48px;
+  }
+}
+
+@keyframes scanline {
+  0% {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  50% {
+    opacity: 0.4;
+  }
+  100% {
+    transform: translateY(120%);
+    opacity: 0;
+  }
+}
+
+.animate-float-slow {
+  animation: floatSlow 16s ease-in-out infinite;
+}
+
+.animate-float-reverse {
+  animation: floatReverse 20s ease-in-out infinite;
+}
+
+.animate-grid-pan {
+  animation: gridPan 24s linear infinite;
+}
+
+.animate-scanline {
+  animation: scanline 9s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
