@@ -9,8 +9,8 @@ const nextConfig = {
   ...(isGithubActions
     ? {
         output: 'export',
-        basePath: '/synthid-remover',
-        assetPrefix: '/synthid-remover',
+        basePath: '/Synthid-remover',
+        assetPrefix: '/Synthid-remover',
       }
     : {}),
 };

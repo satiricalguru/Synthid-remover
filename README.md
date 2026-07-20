@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://satiricalguru.github.io/synthid-remover/"><img src="https://img.shields.io/badge/Live_Demo-GitHub_Pages-emerald.svg?style=for-the-badge&logo=githubpages" alt="Live Demo on GitHub Pages" /></a>
+  <a href="https://satiricalguru.github.io/Synthid-remover/"><img src="https://img.shields.io/badge/Live_Demo-GitHub_Pages-emerald.svg?style=for-the-badge&logo=githubpages" alt="Live Demo on GitHub Pages" /></a>
   <a href="#-license"><img src="https://img.shields.io/badge/License-MIT-black.svg?style=for-the-badge" alt="MIT License" /></a>
   <a href="https://nextjs.org"><img src="https://img.shields.io/badge/Next.js-14.2-black.svg?style=for-the-badge&logo=next.js" alt="Next.js 14" /></a>
   <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5.0-black.svg?style=for-the-badge&logo=typescript" alt="TypeScript" /></a>
@@ -20,7 +20,7 @@
 
 ## 🌐 Live Website
 
-🌐 **Try the Live Application**: [https://satiricalguru.github.io/synthid-remover/](https://satiricalguru.github.io/synthid-remover/)
+🌐 **Try the Live Application**: [https://satiricalguru.github.io/Synthid-remover/](https://satiricalguru.github.io/Synthid-remover/)
 
 ---
 
