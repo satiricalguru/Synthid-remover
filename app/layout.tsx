@@ -15,9 +15,9 @@ export const metadata: Metadata = {
     'EXIF stripper',
   ],
   icons: {
-    icon: '/icon.svg',
-    shortcut: '/icon.svg',
-    apple: '/icon.svg',
+    icon: `${process.env.NEXT_PUBLIC_BASE_PATH || ''}/icon.svg`,
+    shortcut: `${process.env.NEXT_PUBLIC_BASE_PATH || ''}/icon.svg`,
+    apple: `${process.env.NEXT_PUBLIC_BASE_PATH || ''}/icon.svg`,
   },
 };
 
@@ -26,9 +26,13 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '';
   return (
     <html lang="en" suppressHydrationWarning className="scroll-smooth">
       <head>
+        <link rel="icon" type="image/svg+xml" href={`${basePath}/icon.svg`} />
+        <link rel="shortcut icon" href={`${basePath}/icon.svg`} />
+        <link rel="apple-touch-icon" href={`${basePath}/icon.svg`} />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link
