@@ -9,10 +9,28 @@
 </p>
 
 <p align="center">
+  <a href="https://satiricalguru.github.io/synthid-remover/"><img src="https://img.shields.io/badge/Live_Demo-GitHub_Pages-emerald.svg?style=for-the-badge&logo=githubpages" alt="Live Demo on GitHub Pages" /></a>
   <a href="#-license"><img src="https://img.shields.io/badge/License-MIT-black.svg?style=for-the-badge" alt="MIT License" /></a>
   <a href="https://nextjs.org"><img src="https://img.shields.io/badge/Next.js-14.2-black.svg?style=for-the-badge&logo=next.js" alt="Next.js 14" /></a>
   <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5.0-black.svg?style=for-the-badge&logo=typescript" alt="TypeScript" /></a>
-  <a href="#"><img src="https://img.shields.io/badge/Privacy-100%25%20Local-emerald.svg?style=for-the-badge" alt="100% Local" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/Privacy-100%25%20Local-black.svg?style=for-the-badge" alt="100% Local" /></a>
+</p>
+
+---
+
+## 🌐 Live Website
+
+🌐 **Try the Live Application**: [https://satiricalguru.github.io/synthid-remover/](https://satiricalguru.github.io/synthid-remover/)
+
+---
+
+## 📸 Screenshots
+
+<p align="center">
+  <img src="public/hero-watermarked.jpg" width="48%" alt="Original Gemini Watermark" />
+  <img src="public/hero-cleaned.jpg" width="48%" alt="Cleaned Output via Reverse Alpha Blending" />
+  <br />
+  <em>Left: Original image with bottom-right Gemini sparkle badge & embedded SynthID signal.<br />Right: Output after 1-pass Reverse Alpha Blending, EXIF wiping, and frequency signal disruption.</em>
 </p>
 
 ---
@@ -33,7 +51,7 @@ Unlike cloud converters, **your images never touch a remote server**. Everything
 - **📜 Metadata & C2PA Wiping**: Completely wipes EXIF tags, XMP schemas, ICC color profiles, and C2PA Content Credentials attached by ChatGPT, Midjourney, and Gemini.
 - **🌊 SynthID Frequency Signal Disruption**: Resamples spatial DCT phase bins using 100.5% Lanczos-3 matrix scaling and microscopic dither jitter to neutralize imperceptible frequency-domain watermarks.
 - **🖌️ Interactive Brush Inpainting**: Interactive canvas with soft edge falloff for manually painting over complex visual badges.
-- **📊 Local Job History & Telemetry**: Track all local processing runs, execution times, and dimension telemetry in your browser storage (`localStorage`).
+- **📊 Local Job History & Telemetry**: Track all local processing runs, execution times, and dimension telemetry in browser storage (`localStorage`).
 
 ---
 
@@ -45,7 +63,7 @@ Unlike cloud converters, **your images never touch a remote server**. Everything
 | **Language** | [TypeScript](https://www.typescriptlang.org/) |
 | **Styling** | [Tailwind CSS](https://tailwindcss.com/) |
 | **Image Processing** | [Sharp](https://sharp.pixelplumbing.com/) & [`@pilio/gemini-watermark-remover`](https://github.com/GargantuaX/gemini-watermark-remover) |
-| **Icons** | [Lucide React](https://lucide.dev/) |
+| **Deployment** | [GitHub Pages](https://satiricalguru.github.io/synthid-remover/) (GitHub Actions) |
 
 ---
 

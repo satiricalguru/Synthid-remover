@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { applyInpaintMask, stripMetadata, disruptEmbeddedSignals } from '@/lib/imageProcessor';
 
-export const dynamic = 'force-dynamic';
-
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();

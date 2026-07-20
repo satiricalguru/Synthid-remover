@@ -22,6 +22,7 @@ import { InpaintCanvas } from './components/InpaintCanvas';
 import { ProcessingLogs } from './components/ProcessingLogs';
 import { HeroImageScanner } from './components/HeroImageScanner';
 import { saveLocalJob } from '@/lib/localHistory';
+import { processImageClientSide } from '@/lib/clientImageProcessor';
 
 export default function LandingPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -65,22 +66,36 @@ export default function LandingPage() {
     setTelemetryLogs((prev) => [...prev, `[PROCESS] Starting local processing pipeline...`]);
 
     try {
-      const formData = new FormData();
-      formData.append('file', selectedFile);
-      formData.append('stripMetadata', String(stripMetadata));
-      formData.append('disruptSignals', String(disruptSignals));
-      formData.append('removeVisibleBadge', String(removeVisibleBadge));
-      formData.append('format', exportFormat);
+      let data: any;
 
-      const res = await fetch('/api/process', {
-        method: 'POST',
-        body: formData,
-      });
+      try {
+        const formData = new FormData();
+        formData.append('file', selectedFile);
+        formData.append('stripMetadata', String(stripMetadata));
+        formData.append('disruptSignals', String(disruptSignals));
+        formData.append('removeVisibleBadge', String(removeVisibleBadge));
+        formData.append('format', exportFormat);
 
-      const data = await res.json();
+        const res = await fetch('/api/process', {
+          method: 'POST',
+          body: formData,
+        });
 
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to process image');
+        if (res.ok) {
+          data = await res.json();
+        }
+      } catch (e) {
+        console.warn('API route unavailable, using client-side engine fallback.');
+      }
+
+      // If API route returned error or is unavailable (e.g. static export/gh-pages), run client-side
+      if (!data || !data.success) {
+        data = await processImageClientSide(selectedFile, {
+          stripMetadata,
+          disruptSignals,
+          removeVisibleBadge,
+          format: exportFormat,
+        });
       }
 
       setProcessedImageUrl(data.base64Image);

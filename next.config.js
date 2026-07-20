@@ -1,11 +1,18 @@
 /** @type {import('next').NextConfig} */
+const isGithubActions = process.env.GITHUB_ACTIONS || false;
+
 const nextConfig = {
   reactStrictMode: true,
-  experimental: {
-    serverActions: {
-      bodySizeLimit: '25mb',
-    },
+  images: {
+    unoptimized: true,
   },
+  ...(isGithubActions
+    ? {
+        output: 'export',
+        basePath: '/synthid-remover',
+        assetPrefix: '/synthid-remover',
+      }
+    : {}),
 };
 
 module.exports = nextConfig;
