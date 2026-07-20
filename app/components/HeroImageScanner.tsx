@@ -70,7 +70,7 @@ export const HeroImageScanner: React.FC = () => {
         {/* Base Layer: Image WITH Watermark */}
         <div className="absolute inset-0 bg-black">
           <img
-            src="/hero-watermarked.jpg"
+            src={`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/hero-watermarked.jpg`}
             alt="Watermarked Sample"
             className="h-full w-full object-contain"
           />
@@ -103,7 +103,7 @@ export const HeroImageScanner: React.FC = () => {
             style={{ width: containerWidth > 0 ? `${containerWidth}px` : '100%' }}
           >
             <img
-              src="/hero-cleaned.jpg"
+              src={`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/hero-cleaned.jpg`}
               alt="Cleaned Sample"
               className="h-full w-full object-contain"
             />
