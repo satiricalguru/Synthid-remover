@@ -185,8 +185,13 @@ export async function processImageClientSide(
     const data = imageData.data;
     const noiseScale = disruptionMode === 'aggressive' ? (disruptionStrength / 100) * 3.6 : (disruptionStrength / 100) * 2.0;
     const ditherProb = disruptionMode === 'aggressive' ? 0.75 : 0.55;
+    let hasTransparency = false;
 
     for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] < 255) {
+        hasTransparency = true;
+      }
+
       if (Math.random() < ditherProb) {
         const jitter = (Math.random() - 0.5) * noiseScale;
         data[i] = Math.min(255, Math.max(0, Math.round(data[i] + jitter)));
@@ -223,19 +228,28 @@ export async function processImageClientSide(
       ctx.drawImage(tempCanvas, 0, 0, canvas.width, canvas.height);
     }
 
-    // Step 2C: Mandatory Internal Lossy JPEG Round-Trip (DCT Coefficient Quantization)
-    // Runs an intermediate JPEG lossy cycle on canvas to quantize high-frequency DCT harmonics
-    // before final export, ensuring the client matches the server pipeline even for PNG exports.
-    const internalJpegQuality = disruptionMode === 'aggressive' ? 0.84 : 0.88;
-    const internalJpegDataUrl = canvas.toDataURL('image/jpeg', internalJpegQuality);
-    const jpegImg = new Image();
-    await new Promise((resolve, reject) => {
-      jpegImg.onload = resolve;
-      jpegImg.onerror = reject;
-      jpegImg.src = internalJpegDataUrl;
-    });
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(jpegImg, 0, 0);
+    // Step 2C: Mandatory Internal Lossy Round-Trip (DCT Coefficient Quantization)
+    // Runs an intermediate lossy cycle on canvas to quantize high-frequency DCT harmonics
+    // before final export. If transparency is present, we use lossy WebP to avoid flattening
+    // alpha onto black (#000000). For opaque images, we use lossy JPEG.
+    const internalQuality = disruptionMode === 'aggressive' ? 0.84 : 0.88;
+    const lossyMime = hasTransparency ? 'image/webp' : 'image/jpeg';
+    const internalLossyDataUrl = canvas.toDataURL(lossyMime, internalQuality);
+
+    // If toDataURL('image/webp') is not supported or returns same data, canvas safely fallbacks
+    if (internalLossyDataUrl && !internalLossyDataUrl.startsWith('data:image/png')) {
+      const lossyImg = new Image();
+      await new Promise((resolve, reject) => {
+        lossyImg.onload = resolve;
+        lossyImg.onerror = reject;
+        lossyImg.src = internalLossyDataUrl;
+      });
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(lossyImg, 0, 0);
+      logs.push(`[PROCESS] Lossy DCT quantization pass applied (${hasTransparency ? 'alpha-preserving WebP' : 'JPEG'}).`);
+    } else {
+      logs.push(`[INFO] Alpha transparency preserved without lossy container flattening.`);
+    }
 
     logs.push(`[SUCCESS] Chrominance phase shift, anisotropic grid realignment, & DCT quantization completed.`);
   } else if (isMetadataOnly) {

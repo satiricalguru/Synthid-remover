@@ -200,7 +200,12 @@ export async function disruptEmbeddedSignals(
   const noiseScale = mode === 'aggressive' ? (strength / 100) * 3.6 : (strength / 100) * 2.0;
   const ditherProb = mode === 'aggressive' ? 0.75 : 0.55;
 
+  let hasTransparency = false;
   for (let i = 0; i < pixelArray.length; i += totalChannels) {
+    if (pixelArray[i + 3] < 255) {
+      hasTransparency = true;
+    }
+
     if (Math.random() < ditherProb) {
       const r = pixelArray[i];
       const g = pixelArray[i + 1];
@@ -257,24 +262,37 @@ export async function disruptEmbeddedSignals(
       .toBuffer();
   }
 
-  // Step 5: Mandatory Internal Lossy JPEG Round-Trip (DCT Coefficient Quantization)
+  // Step 5: Mandatory Internal Lossy Round-Trip (DCT Coefficient Quantization)
   // Steganographic watermarks hide in subtle high-frequency DCT harmonic relationships.
-  // Cycling through a lossy Mozjpeg pass with trellis quantization quantizes and zeroes out
-  // low-amplitude high-frequency DCT bins at the mathematical matrix level.
-  const internalJpegQuality = mode === 'aggressive' ? 84 : 88;
-  const intermediateJpeg = await sharp(currentBuffer)
-    .jpeg({
-      quality: internalJpegQuality,
-      mozjpeg: true,
-      trellisQuantisation: true,
-      overshootDeringing: true,
-      chromaSubsampling: '4:2:0',
-    })
-    .toBuffer();
+  // Cycling through a lossy pass quantizes and zeroes out low-amplitude high-frequency DCT bins.
+  // If the image contains transparency (alpha < 255), JPEG would flatten it onto black (#000000).
+  // In that case, we use lossy WebP with alpha preservation; otherwise, we use Mozjpeg trellis quantization.
+  let intermediateLossy: Buffer;
+  if (!hasTransparency) {
+    const internalJpegQuality = mode === 'aggressive' ? 84 : 88;
+    intermediateLossy = await sharp(currentBuffer)
+      .jpeg({
+        quality: internalJpegQuality,
+        mozjpeg: true,
+        trellisQuantisation: true,
+        overshootDeringing: true,
+        chromaSubsampling: '4:2:0',
+      })
+      .toBuffer();
+  } else {
+    const internalWebpQuality = mode === 'aggressive' ? 82 : 88;
+    intermediateLossy = await sharp(currentBuffer)
+      .webp({
+        quality: internalWebpQuality,
+        effort: 4,
+        alphaQuality: 100,
+      })
+      .toBuffer();
+  }
 
   // Step 6: Detail Preservation / Subtle Unsharp Mask
   // Re-accentuates high-contrast structural edges while keeping steganographic low-amplitude noise scrubbed
-  let finalPipeline = sharp(intermediateJpeg).sharpen({
+  let finalPipeline = sharp(intermediateLossy).sharpen({
     sigma: mode === 'aggressive' ? 0.75 : 0.5,
     m1: 0.5,
     m2: 1.5,
@@ -493,6 +511,21 @@ export async function processImagePipeline(
     logs.push(`[SUCCESS] SynthID and OpenAI spatial frequency carrier waves neutralized.`);
   } else if (isMetadataOnly) {
     logs.push(`[INFO] Metadata-only mode active: pixel matrix preserved bit-for-bit.`);
+  }
+
+  // 3.5 Ensure output container matches requested target format under all toggle configurations
+  const targetFormat = options.targetFormat || 'png';
+  const currentMeta = await sharp(currentBuffer).metadata();
+  const currentFormat = currentMeta.format === 'jpg' ? 'jpeg' : currentMeta.format;
+  if (currentFormat !== targetFormat) {
+    logs.push(`[PROCESS] Re-encoding container format from ${currentFormat} to match requested format (${targetFormat})...`);
+    if (targetFormat === 'jpeg') {
+      currentBuffer = await sharp(currentBuffer).jpeg({ quality: options.quality || 95 }).toBuffer();
+    } else if (targetFormat === 'webp') {
+      currentBuffer = await sharp(currentBuffer).webp({ quality: options.quality || 95 }).toBuffer();
+    } else {
+      currentBuffer = await sharp(currentBuffer).png({ compressionLevel: 8 }).toBuffer();
+    }
   }
 
   // 4. Perform Real Byte-Level Forensic Provenance Audit on Output Buffer

@@ -444,7 +444,7 @@ export default function LandingPage() {
                             </div>
                             <p className="text-[11px] text-neutral-500 dark:text-neutral-400 leading-relaxed">
                               {disruptionMode === 'balanced' && '2-stage Lanczos phase shift & chroma dither. Neutralizes standard SynthID while preserving crisp details (PSNR >38dB).'}
-                              {disruptionMode === 'aggressive' && 'Multi-spectral scrub, asymmetric Lanczos-3 realignment, & DCT trellis quantization. Defeats OpenAI Verifier & synthid.com.'}
+                              {disruptionMode === 'aggressive' && 'Multi-spectral scrub, asymmetric Lanczos-3 realignment, & DCT trellis quantization. Targets strict neural verifiers (best-effort; recheck on verifier portals).'}
                               {disruptionMode === 'metadata-only' && '100% bit-for-bit lossless pixel preservation. Purges all C2PA Content Credentials, EXIF, and XMP tags.'}
                             </p>
                           </div>
@@ -575,7 +575,7 @@ export default function LandingPage() {
                               </span>
                             </div>
 
-                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-[11px]">
+                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 pt-1 text-[11px]">
                               <div className="flex items-center gap-1.5 p-2 rounded-lg bg-white dark:bg-black/40 border border-neutral-200 dark:border-neutral-800">
                                 {telemetryMeta.provenanceAudit?.c2paFound ? (
                                   <span className="text-amber-500 font-bold shrink-0">⚠️</span>
@@ -604,8 +604,21 @@ export default function LandingPage() {
                               </div>
 
                               <div className="flex items-center gap-1.5 p-2 rounded-lg bg-white dark:bg-black/40 border border-neutral-200 dark:border-neutral-800">
-                                <CheckCircle className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-                                <span className="truncate">DCT Carrier: <strong className="text-emerald-500">{disruptionMode === 'metadata-only' ? 'Untouched' : 'Disrupted'}</strong></span>
+                                {telemetryMeta.provenanceAudit?.iccFound ? (
+                                  <span className="text-amber-500 font-bold shrink-0">⚠️</span>
+                                ) : (
+                                  <CheckCircle className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                                )}
+                                <span className="truncate">ICC Profile: <strong className={telemetryMeta.provenanceAudit?.iccFound ? 'text-amber-500' : 'text-emerald-500'}>{telemetryMeta.provenanceAudit?.iccFound ? 'Found' : 'Clean (0)'}</strong></span>
+                              </div>
+
+                              <div className="flex items-center gap-1.5 p-2 rounded-lg bg-white dark:bg-black/40 border border-neutral-200 dark:border-neutral-800">
+                                {telemetryMeta.provenanceAudit?.iptcFound ? (
+                                  <span className="text-amber-500 font-bold shrink-0">⚠️</span>
+                                ) : (
+                                  <CheckCircle className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                                )}
+                                <span className="truncate">IPTC Data: <strong className={telemetryMeta.provenanceAudit?.iptcFound ? 'text-amber-500' : 'text-emerald-500'}>{telemetryMeta.provenanceAudit?.iptcFound ? 'Found' : 'Clean (0)'}</strong></span>
                               </div>
                             </div>
                           </div>

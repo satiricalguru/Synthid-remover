@@ -176,8 +176,58 @@ async function runVerificationSuite() {
     });
   }
 
+  // --------------------------------------------------------------------------
+  // FIXTURE 3: Transparent PNG Preservation Test (Alpha Channel Integrity)
+  // --------------------------------------------------------------------------
+  console.log('\n[SETUP: FIXTURE 3] Generating transparent PNG with alpha channel...');
+  const transparentSvg = Buffer.from(`
+    <svg width="200" height="200">
+      <rect x="50" y="50" width="100" height="100" fill="rgba(255, 0, 0, 0.8)" />
+    </svg>
+  `);
+  const transparentPng = await sharp(transparentSvg).png().toBuffer();
+
+  for (const mode of ['balanced', 'aggressive']) {
+    console.log(`\n[Fixture 3 - Transparent PNG] Mode: ${mode.toUpperCase()}`);
+    const res = await processImagePipeline(transparentPng, {
+      disruptionMode: mode,
+      disruptionStrength: 75,
+      stripMetadata: true,
+      targetFormat: 'png',
+    });
+
+    const { data: outPixels } = await sharp(res.buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    let transparentPixelCount = 0;
+    for (let i = 0; i < outPixels.length; i += 4) {
+      if (outPixels[i + 3] < 200) {
+        transparentPixelCount++;
+      }
+    }
+
+    if (transparentPixelCount === 0) {
+      throw new Error(`[ASSERTION FAILED] Mode '${mode}' flattened transparent alpha channel onto solid background!`);
+    }
+    console.log(`  ✅ Alpha channel preserved: ${transparentPixelCount} transparent pixels detected in output PNG.`);
+  }
+
+  // --------------------------------------------------------------------------
+  // FIXTURE 4: Format Conversion with All Toggles Disabled (MIME Integrity)
+  // --------------------------------------------------------------------------
+  console.log('\n[SETUP: FIXTURE 4] Verifying container format conversion with all toggles disabled...');
+  const mimeTest = await processImagePipeline(syntheticInput, {
+    stripMetadata: false,
+    disruptSignals: false,
+    removeVisibleBadge: false,
+    targetFormat: 'webp',
+  });
+  const mimeScan = scanBufferProvenance(mimeTest.buffer);
+  if (mimeScan.formatDetected.toLowerCase() !== 'webp') {
+    throw new Error(`[ASSERTION FAILED] Requested 'webp' format but output container was detected as '${mimeScan.formatDetected}'!`);
+  }
+  console.log(`  ✅ Container re-encoding verified: detected format matches requested 'webp'.`);
+
   console.log('\n====================================================');
-  console.log('✅ ALL PIPELINE & AUDIT ASSERTIONS PASSED (BOTH FIXTURES)');
+  console.log('✅ ALL PIPELINE, AUDIT, & ALPHA ASSERTIONS PASSED');
   console.log('====================================================');
   console.log('\n--- Fixture 1: Synthetic Gradient Results ---');
   console.table(syntheticResults);
