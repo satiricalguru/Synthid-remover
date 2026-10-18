@@ -302,7 +302,7 @@ export default function LandingPage() {
               </div>
               <div className="flex items-center gap-1.5">
                 <CheckCircle className="h-4 w-4 text-emerald-500" />
-                <span>Evades synthid.com Detection</span>
+                <span>Disrupts SynthID Detection</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <CheckCircle className="h-4 w-4 text-emerald-500" />
@@ -807,7 +807,7 @@ export default function LandingPage() {
       </section>
 
       {/* FAQ SECTION */}
-      <section className="py-20 bg-neutral-50 dark:bg-onyx border-b border-neutral-200 dark:border-neutral-800">
+      <section id="faq" className="py-20 bg-neutral-50 dark:bg-onyx border-b border-neutral-200 dark:border-neutral-800">
         <div className="mx-auto max-w-4xl px-4 sm:px-6">
           <div className="mb-10 text-center">
             <span className="font-mono text-xs font-semibold tracking-widest text-neutral-500 dark:text-neutral-400 uppercase">
