@@ -1,3 +1,5 @@
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 import sharp from 'sharp';
 import { processImagePipeline, scanBufferProvenance } from '../lib/imageProcessor.ts';
 
@@ -30,11 +32,14 @@ async function runVerificationSuite() {
   console.log('🧪 REALTIME SYNTHID-REMOVER AUTOMATED TEST SUITE');
   console.log('====================================================\n');
 
-  // Step 1: Create a test image with high-entropy gradients and synthetic EXIF tags
+  const testModes = ['metadata-only', 'balanced', 'aggressive'];
+
+  // --------------------------------------------------------------------------
+  // FIXTURE 1: Synthetic High-Entropy Gradient + Mock EXIF
+  // --------------------------------------------------------------------------
   const width = 400;
   const height = 400;
 
-  // Create radial gradient pattern
   const rawSvg = Buffer.from(`
     <svg width="${width}" height="${height}">
       <defs>
@@ -50,7 +55,7 @@ async function runVerificationSuite() {
     </svg>
   `);
 
-  const originalInput = await sharp(rawSvg)
+  const syntheticInput = await sharp(rawSvg)
     .withMetadata({
       exif: {
         IFD0: {
@@ -63,22 +68,21 @@ async function runVerificationSuite() {
     .jpeg()
     .toBuffer();
 
-  console.log(`[SETUP] Generated mock test image (${width}x${height}px, ${(originalInput.length / 1024).toFixed(1)} KB)`);
+  console.log(`[SETUP: FIXTURE 1] Generated synthetic SVG test image (${width}x${height}px, ${(syntheticInput.length / 1024).toFixed(1)} KB)`);
 
-  const initialScan = scanBufferProvenance(originalInput);
-  console.log(`[SETUP] Initial provenance scan: EXIF=${initialScan.exifFound}, C2PA=${initialScan.c2paFound}, Clean=${initialScan.clean}`);
+  const initialScan1 = scanBufferProvenance(syntheticInput);
+  console.log(`[SETUP: FIXTURE 1] Initial scan: EXIF=${initialScan1.exifFound}, C2PA=${initialScan1.c2paFound}, Clean=${initialScan1.clean}`);
 
-  if (initialScan.clean) {
-    throw new Error('Test setup error: initial mock image was expected to contain EXIF metadata.');
+  if (initialScan1.clean) {
+    throw new Error('Test setup error: Fixture 1 was expected to contain EXIF metadata.');
   }
 
-  const testModes = ['metadata-only', 'balanced', 'aggressive'];
-  const results = [];
+  const syntheticResults = [];
 
   for (const mode of testModes) {
-    console.log(`\n--- Testing Mode: ${mode.toUpperCase()} ---`);
+    console.log(`\n[Fixture 1 - SVG Gradient] Mode: ${mode.toUpperCase()}`);
 
-    const result = await processImagePipeline(originalInput, {
+    const result = await processImagePipeline(syntheticInput, {
       disruptionMode: mode,
       disruptionStrength: 75,
       stripMetadata: true,
@@ -86,42 +90,99 @@ async function runVerificationSuite() {
     });
 
     const audit = result.telemetry.provenanceAudit;
-    const { mse, psnr } = await calculatePSNR(originalInput, result.buffer);
+    const { mse, psnr } = await calculatePSNR(syntheticInput, result.buffer);
 
-    console.log(`  ⏱️ Execution time: ${result.telemetry.executionTimeMs} ms`);
-    console.log(`  📦 Output size: ${(result.buffer.length / 1024).toFixed(1)} KB`);
-    console.log(`  🔍 Byte-level Audit: C2PA=${audit.c2paFound ? 'FOUND' : 'CLEAN'}, EXIF=${audit.exifFound ? 'FOUND' : 'CLEAN'}, XMP=${audit.xmpFound ? 'FOUND' : 'CLEAN'}`);
+    console.log(`  ⏱️ Time: ${result.telemetry.executionTimeMs} ms | 📦 Size: ${(result.buffer.length / 1024).toFixed(1)} KB`);
+    console.log(`  🔍 Byte Audit: C2PA=${audit.c2paFound ? 'FOUND' : 'CLEAN'}, EXIF=${audit.exifFound ? 'FOUND' : 'CLEAN'}, XMP=${audit.xmpFound ? 'FOUND' : 'CLEAN'}, ICC=${audit.iccFound ? 'FOUND' : 'CLEAN'}`);
     console.log(`  📊 Measured PSNR: ${psnr === Infinity ? 'Infinity (Lossless)' : psnr.toFixed(2) + ' dB'} (MSE: ${mse.toFixed(2)})`);
 
-    // Assertions
     if (!audit.clean) {
-      throw new Error(`[ASSERTION FAILED] Mode '${mode}' did not produce a clean byte container! Detected: C2PA=${audit.c2paFound}, EXIF=${audit.exifFound}, XMP=${audit.xmpFound}`);
+      throw new Error(`[ASSERTION FAILED] Fixture 1 in mode '${mode}' did not produce a clean byte container!`);
     }
 
-    if (mode === 'metadata-only' && psnr < 45) {
-      throw new Error(`[ASSERTION FAILED] Metadata-only mode caused visual drift (PSNR: ${psnr.toFixed(2)} dB, expected >= 45 dB)`);
+    if (mode === 'metadata-only' && psnr !== Infinity) {
+      throw new Error(`[ASSERTION FAILED] Metadata-only mode must preserve 100% lossless bit-for-bit pixels (got PSNR: ${psnr.toFixed(2)} dB, expected Infinity)`);
     }
 
-    if (mode === 'balanced' && psnr < 34) {
-      throw new Error(`[ASSERTION FAILED] Balanced mode visual drift exceeded threshold (PSNR: ${psnr.toFixed(2)} dB, expected >= 34 dB)`);
+    if (mode === 'balanced' && psnr < 38) {
+      throw new Error(`[ASSERTION FAILED] Balanced mode visual drift exceeded threshold (PSNR: ${psnr.toFixed(2)} dB, expected >= 38 dB)`);
     }
 
-    if (mode === 'aggressive' && psnr < 30) {
-      throw new Error(`[ASSERTION FAILED] Aggressive mode visual drift exceeded threshold (PSNR: ${psnr.toFixed(2)} dB, expected >= 30 dB)`);
+    if (mode === 'aggressive' && psnr < 35) {
+      throw new Error(`[ASSERTION FAILED] Aggressive mode visual drift exceeded threshold (PSNR: ${psnr.toFixed(2)} dB, expected >= 35 dB)`);
     }
 
-    results.push({
+    syntheticResults.push({
+      fixture: 'SVG Gradient (400x400)',
       mode,
       auditClean: audit.clean,
       psnr: psnr === Infinity ? 'Infinity (Lossless)' : psnr.toFixed(2) + ' dB',
+      mse: mse.toFixed(2),
+      timeMs: result.telemetry.executionTimeMs,
+    });
+  }
+
+  // --------------------------------------------------------------------------
+  // FIXTURE 2: Realistic Textured Photograph (public/hero-watermarked.jpg)
+  // --------------------------------------------------------------------------
+  const photoPath = fileURLToPath(new URL('../public/hero-watermarked.jpg', import.meta.url));
+  const photoInput = fs.readFileSync(photoPath);
+  const photoMeta = await sharp(photoInput).metadata();
+
+  console.log(`\n[SETUP: FIXTURE 2] Loaded real photo (${photoMeta.width}x${photoMeta.height}px, ${(photoInput.length / 1024).toFixed(1)} KB)`);
+
+  const photoResults = [];
+
+  for (const mode of testModes) {
+    console.log(`\n[Fixture 2 - Real Photo] Mode: ${mode.toUpperCase()}`);
+
+    const result = await processImagePipeline(photoInput, {
+      disruptionMode: mode,
+      disruptionStrength: 75,
+      stripMetadata: true,
+      targetFormat: 'png',
+    });
+
+    const audit = result.telemetry.provenanceAudit;
+    const { mse, psnr } = await calculatePSNR(photoInput, result.buffer);
+
+    console.log(`  ⏱️ Time: ${result.telemetry.executionTimeMs} ms | 📦 Size: ${(result.buffer.length / 1024).toFixed(1)} KB`);
+    console.log(`  🔍 Byte Audit: C2PA=${audit.c2paFound ? 'FOUND' : 'CLEAN'}, EXIF=${audit.exifFound ? 'FOUND' : 'CLEAN'}, XMP=${audit.xmpFound ? 'FOUND' : 'CLEAN'}, ICC=${audit.iccFound ? 'FOUND' : 'CLEAN'}`);
+    console.log(`  📊 Measured PSNR: ${psnr === Infinity ? 'Infinity (Lossless)' : psnr.toFixed(2) + ' dB'} (MSE: ${mse.toFixed(2)})`);
+
+    if (!audit.clean) {
+      throw new Error(`[ASSERTION FAILED] Fixture 2 in mode '${mode}' did not produce a clean byte container!`);
+    }
+
+    if (mode === 'metadata-only' && psnr !== Infinity) {
+      throw new Error(`[ASSERTION FAILED] Metadata-only mode must preserve 100% lossless bit-for-bit pixels on photo! (got PSNR: ${psnr.toFixed(2)} dB, expected Infinity)`);
+    }
+
+    if (mode === 'balanced' && psnr < 35) {
+      throw new Error(`[ASSERTION FAILED] Balanced mode visual drift on photo exceeded threshold (PSNR: ${psnr.toFixed(2)} dB, expected >= 35 dB)`);
+    }
+
+    if (mode === 'aggressive' && psnr < 30) {
+      throw new Error(`[ASSERTION FAILED] Aggressive mode visual drift on photo exceeded threshold (PSNR: ${psnr.toFixed(2)} dB, expected >= 30 dB)`);
+    }
+
+    photoResults.push({
+      fixture: 'Real Photo (1200x655)',
+      mode,
+      auditClean: audit.clean,
+      psnr: psnr === Infinity ? 'Infinity (Lossless)' : psnr.toFixed(2) + ' dB',
+      mse: mse.toFixed(2),
       timeMs: result.telemetry.executionTimeMs,
     });
   }
 
   console.log('\n====================================================');
-  console.log('✅ ALL PIPELINE & AUDIT ASSERTIONS PASSED');
+  console.log('✅ ALL PIPELINE & AUDIT ASSERTIONS PASSED (BOTH FIXTURES)');
   console.log('====================================================');
-  console.table(results);
+  console.log('\n--- Fixture 1: Synthetic Gradient Results ---');
+  console.table(syntheticResults);
+  console.log('\n--- Fixture 2: Real Photograph Results ---');
+  console.table(photoResults);
 }
 
 runVerificationSuite()

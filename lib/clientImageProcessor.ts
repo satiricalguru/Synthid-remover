@@ -16,13 +16,16 @@ export interface ClientProvenanceAudit {
   c2paFound: boolean;
   exifFound: boolean;
   xmpFound: boolean;
+  iccFound: boolean;
+  iptcFound: boolean;
   clean: boolean;
   bytesScanned: number;
   formatDetected: string;
 }
 
 /**
- * Scans base64 image data bytes on client side to verify absence of C2PA, EXIF, and XMP chunks.
+ * Forensic byte-level scanner on client-side base64 image strings.
+ * Verifies that zero C2PA (caBX / JUMBF), EXIF, XMP, ICC, or IPTC chunks survive.
  */
 export function scanBase64Provenance(base64Data: string): ClientProvenanceAudit {
   const binaryString = atob(base64Data.split(',')[1] || '');
@@ -35,6 +38,8 @@ export function scanBase64Provenance(base64Data: string): ClientProvenanceAudit 
   let c2pa = false;
   let exif = false;
   let xmp = false;
+  let icc = false;
+  let iptc = false;
   let format = 'unknown';
 
   // PNG
@@ -44,7 +49,10 @@ export function scanBase64Provenance(base64Data: string): ClientProvenanceAudit 
     while (offset + 8 <= bytes.length) {
       const chunkLen = (bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3];
       const chunkType = String.fromCharCode(bytes[offset + 4], bytes[offset + 5], bytes[offset + 6], bytes[offset + 7]);
+
+      if (chunkType === 'caBX') c2pa = true;
       if (chunkType === 'eXIf') exif = true;
+      if (chunkType === 'iCCP') icc = true;
       if (chunkType === 'iTXt' || chunkType === 'tEXt' || chunkType === 'zTXt') {
         let chunkText = '';
         const maxText = Math.min(bytes.length, offset + 8 + Math.min(chunkLen, 120));
@@ -54,6 +62,7 @@ export function scanBase64Provenance(base64Data: string): ClientProvenanceAudit 
         if (/c2pa|contentcredentials/i.test(chunkText)) c2pa = true;
         if (/xmp|ns\.adobe/i.test(chunkText)) xmp = true;
         if (/exif/i.test(chunkText)) exif = true;
+        if (/iptc/i.test(chunkText)) iptc = true;
       }
       offset += 12 + chunkLen;
     }
@@ -67,6 +76,7 @@ export function scanBase64Provenance(base64Data: string): ClientProvenanceAudit 
       const marker = bytes[offset + 1];
       if (marker === 0xda || marker === 0xd9) break;
       const markerLen = (bytes[offset + 2] << 8) | bytes[offset + 3];
+
       if (marker === 0xe1) {
         let payload = '';
         const maxP = Math.min(bytes.length, offset + 4 + Math.min(markerLen - 2, 40));
@@ -76,7 +86,10 @@ export function scanBase64Provenance(base64Data: string): ClientProvenanceAudit 
         if (payload.startsWith('Exif')) exif = true;
         if (payload.includes('ns.adobe.com') || payload.includes('XMP')) xmp = true;
       }
+      if (marker === 0xe2) icc = true;
+      if (marker === 0xed) iptc = true;
       if (marker === 0xeb) c2pa = true;
+
       offset += 2 + markerLen;
     }
   }
@@ -87,8 +100,11 @@ export function scanBase64Provenance(base64Data: string): ClientProvenanceAudit 
     while (offset + 8 <= bytes.length) {
       const chunkId = String.fromCharCode(bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]);
       const chunkLen = bytes[offset + 4] | (bytes[offset + 5] << 8) | (bytes[offset + 6] << 16) | (bytes[offset + 7] << 24);
+
       if (chunkId === 'EXIF') exif = true;
       if (chunkId === 'XMP ') xmp = true;
+      if (chunkId === 'ICCP') icc = true;
+
       offset += 8 + chunkLen + (chunkLen % 2);
     }
   }
@@ -97,7 +113,9 @@ export function scanBase64Provenance(base64Data: string): ClientProvenanceAudit 
     c2paFound: c2pa,
     exifFound: exif,
     xmpFound: xmp,
-    clean: !c2pa && !exif && !xmp,
+    iccFound: icc,
+    iptcFound: iptc,
+    clean: !c2pa && !exif && !xmp && !icc && !iptc,
     bytesScanned: bytes.length,
     formatDetected: format,
   };
@@ -112,6 +130,8 @@ export async function processImageClientSide(
 
   const disruptionMode = options.disruptionMode || 'balanced';
   const disruptionStrength = options.disruptionStrength ?? 75;
+  const isMetadataOnly = disruptionMode === 'metadata-only';
+  const shouldRemoveBadge = options.removeVisibleBadge !== false && !isMetadataOnly;
 
   logs.push(`[CLIENT] Selected image file: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`);
 
@@ -136,7 +156,7 @@ export async function processImageClientSide(
   logs.push(`[CLIENT] Image dimensions: ${canvas.width}x${canvas.height}px | Mode: ${disruptionMode.toUpperCase()}`);
 
   // 1. Erase Gemini Sparkle Watermark via Reverse Alpha Blending
-  if (options.removeVisibleBadge !== false) {
+  if (shouldRemoveBadge) {
     logs.push(`[PROCESS] Auto-erasing visible Gemini sparkle watermark with adaptive fallback...`);
     try {
       const result = removeWatermarkFromImageDataSync(imageData, {
@@ -153,10 +173,12 @@ export async function processImageClientSide(
       console.warn('Client watermark removal warning:', err);
       logs.push(`[WARN] Automatic badge removal pass bypassed.`);
     }
+  } else if (isMetadataOnly) {
+    logs.push(`[INFO] Metadata-only mode active: visual badge removal bypassed to preserve bit-for-bit pixel integrity.`);
   }
 
   // 2. Frequency Disruption (SynthID & OpenAI Verifier Evasion)
-  if (options.disruptSignals !== false && disruptionMode !== 'metadata-only') {
+  if (options.disruptSignals !== false && !isMetadataOnly) {
     logs.push(`[PROCESS] Initializing ${disruptionMode.toUpperCase()} frequency disruption (Strength: ${disruptionStrength}%)...`);
 
     // Step 2A: Chrominance-targeted microscopic frequency dither
@@ -201,9 +223,23 @@ export async function processImageClientSide(
       ctx.drawImage(tempCanvas, 0, 0, canvas.width, canvas.height);
     }
 
-    logs.push(`[SUCCESS] Chrominance phase shift and anisotropic grid realignment completed.`);
-  } else if (disruptionMode === 'metadata-only') {
-    logs.push(`[INFO] Metadata-only mode active: preserving pixel data.`);
+    // Step 2C: Mandatory Internal Lossy JPEG Round-Trip (DCT Coefficient Quantization)
+    // Runs an intermediate JPEG lossy cycle on canvas to quantize high-frequency DCT harmonics
+    // before final export, ensuring the client matches the server pipeline even for PNG exports.
+    const internalJpegQuality = disruptionMode === 'aggressive' ? 0.84 : 0.88;
+    const internalJpegDataUrl = canvas.toDataURL('image/jpeg', internalJpegQuality);
+    const jpegImg = new Image();
+    await new Promise((resolve, reject) => {
+      jpegImg.onload = resolve;
+      jpegImg.onerror = reject;
+      jpegImg.src = internalJpegDataUrl;
+    });
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(jpegImg, 0, 0);
+
+    logs.push(`[SUCCESS] Chrominance phase shift, anisotropic grid realignment, & DCT quantization completed.`);
+  } else if (isMetadataOnly) {
+    logs.push(`[INFO] Metadata-only mode active: preserving pixel data bit-for-bit.`);
   }
 
   // 3. Metadata Stripping (Canvas export strips all C2PA, EXIF, and XMP metadata)
@@ -217,9 +253,9 @@ export async function processImageClientSide(
   const exportQuality = options.quality ? options.quality / 100 : 0.95;
   const base64Image = canvas.toDataURL(mimeType, exportQuality);
 
-  // 4. Perform Real Byte-Level Provenance Audit on Client Base64
+  // 4. Perform Real Forensic Byte-Level Provenance Audit on Client Base64
   const provenanceAudit = scanBase64Provenance(base64Image);
-  logs.push(`[AUDIT] Scanned ${provenanceAudit.bytesScanned} bytes (${provenanceAudit.formatDetected}): C2PA=${provenanceAudit.c2paFound ? 'FOUND' : 'CLEAN'}, EXIF=${provenanceAudit.exifFound ? 'FOUND' : 'CLEAN'}, XMP=${provenanceAudit.xmpFound ? 'FOUND' : 'CLEAN'}`);
+  logs.push(`[AUDIT] Scanned ${provenanceAudit.bytesScanned} bytes (${provenanceAudit.formatDetected}): C2PA=${provenanceAudit.c2paFound ? 'FOUND' : 'CLEAN'}, EXIF=${provenanceAudit.exifFound ? 'FOUND' : 'CLEAN'}, XMP=${provenanceAudit.xmpFound ? 'FOUND' : 'CLEAN'}, ICC=${provenanceAudit.iccFound ? 'FOUND' : 'CLEAN'}, IPTC=${provenanceAudit.iptcFound ? 'FOUND' : 'CLEAN'}`);
 
   const executionTimeMs = Date.now() - startTime;
   logs.push(`[COMPLETE] Pipeline finished in ${executionTimeMs}ms (Browser Memory).`);
@@ -231,9 +267,9 @@ export async function processImageClientSide(
       processedSize: Math.round(base64Image.length * 0.75),
       dimensions: { width: canvas.width, height: canvas.height },
       metadataStripped: options.stripMetadata !== false,
-      signalsDisrupted: options.disruptSignals !== false && disruptionMode !== 'metadata-only',
+      signalsDisrupted: options.disruptSignals !== false && !isMetadataOnly,
       disruptionMode,
-      badgeRemoved: options.removeVisibleBadge !== false,
+      badgeRemoved: shouldRemoveBadge,
       provenanceAudit,
       executionTimeMs,
       logs,

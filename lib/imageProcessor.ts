@@ -16,6 +16,8 @@ export interface ProvenanceAuditResult {
   c2paFound: boolean;
   exifFound: boolean;
   xmpFound: boolean;
+  iccFound: boolean;
+  iptcFound: boolean;
   clean: boolean;
   bytesScanned: number;
   formatDetected: string;
@@ -40,14 +42,16 @@ export interface ProcessingTelemetry {
 }
 
 /**
- * Real byte-level provenance chunk scanner.
- * Scans output buffer byte markers to verify that zero C2PA manifests,
- * EXIF headers, or XMP schemas exist in the binary container.
+ * Forensic byte-level provenance chunk scanner.
+ * Scans binary chunks/markers across PNG, JPEG, and WebP containers to verify that
+ * zero C2PA manifests, EXIF headers, XMP schemas, ICC profiles, or IPTC blocks exist.
  */
 export function scanBufferProvenance(buf: Buffer): ProvenanceAuditResult {
   let c2pa = false;
   let exif = false;
   let xmp = false;
+  let icc = false;
+  let iptc = false;
   let format = 'unknown';
 
   // Check PNG signature: 89 50 4E 47 0D 0A 1A 0A
@@ -58,12 +62,16 @@ export function scanBufferProvenance(buf: Buffer): ProvenanceAuditResult {
       const length = buf.readUInt32BE(offset);
       const type = buf.toString('ascii', offset + 4, offset + 8);
       const chunkData = buf.subarray(offset + 8, Math.min(buf.length, offset + 8 + length));
+
+      if (type === 'caBX') c2pa = true; // ISO/C2PA standard PNG chunk
       if (type === 'eXIf') exif = true;
+      if (type === 'iCCP') icc = true;
       if (type === 'iTXt' || type === 'tEXt' || type === 'zTXt') {
         const text = chunkData.toString('utf-8', 0, Math.min(chunkData.length, 120));
         if (/c2pa|contentcredentials/i.test(text)) c2pa = true;
         if (/xmp|ns\.adobe/i.test(text)) xmp = true;
         if (/exif/i.test(text)) exif = true;
+        if (/iptc/i.test(text)) iptc = true;
       }
       offset += 12 + length;
     }
@@ -78,14 +86,16 @@ export function scanBufferProvenance(buf: Buffer): ProvenanceAuditResult {
       const marker = buf[offset + 1];
       if (marker === 0xDA || marker === 0xD9) break; // SOS or EOI
       const len = buf.readUInt16BE(offset + 2);
+
       if (marker === 0xE1) { // APP1 (Exif or XMP)
         const payload = buf.toString('ascii', offset + 4, Math.min(buf.length, offset + 4 + Math.min(len - 2, 40)));
         if (payload.startsWith('Exif')) exif = true;
         if (payload.includes('ns.adobe.com') || payload.includes('XMP')) xmp = true;
       }
-      if (marker === 0xEB) { // APP11 (JUMBF / C2PA)
-        c2pa = true;
-      }
+      if (marker === 0xE2) icc = true; // APP2 (ICC profile / MPF)
+      if (marker === 0xED) iptc = true; // APP13 (Photoshop / IPTC)
+      if (marker === 0xEB) c2pa = true; // APP11 (JUMBF / C2PA)
+
       offset += 2 + len;
     }
   }
@@ -97,8 +107,11 @@ export function scanBufferProvenance(buf: Buffer): ProvenanceAuditResult {
     while (offset + 8 <= buf.length) {
       const chunkId = buf.toString('ascii', offset, offset + 4);
       const chunkLen = buf.readUInt32LE(offset + 4);
+
       if (chunkId === 'EXIF') exif = true;
       if (chunkId === 'XMP ') xmp = true;
+      if (chunkId === 'ICCP') icc = true;
+
       offset += 8 + chunkLen + (chunkLen % 2);
     }
   }
@@ -107,7 +120,9 @@ export function scanBufferProvenance(buf: Buffer): ProvenanceAuditResult {
     c2paFound: c2pa,
     exifFound: exif,
     xmpFound: xmp,
-    clean: !c2pa && !exif && !xmp,
+    iccFound: icc,
+    iptcFound: iptc,
+    clean: !c2pa && !exif && !xmp && !icc && !iptc,
     bytesScanned: buf.length,
     formatDetected: format,
   };
@@ -151,7 +166,7 @@ export async function stripMetadata(inputBuffer: Buffer, targetFormat: 'png' | '
  * 1. Targeted chrominance phase decorrelation.
  * 2. Non-uniform anisotropic spatial squeeze/stretch (breaking rectangular CNN receptive fields).
  * 3. Mandatory internal lossy JPEG round-trip (quantizing high-frequency DCT matrix harmonics).
- * 4. Structural detail restoration with subtle unsharp filter (preserves PSNR >35 dB).
+ * 4. Structural detail restoration with subtle unsharp filter.
  */
 export async function disruptEmbeddedSignals(
   inputBuffer: Buffer,
@@ -432,8 +447,12 @@ export async function processImagePipeline(
 
   let badgeDetails: { applied: boolean; decisionTier?: string | null; alphaGain?: number } | undefined;
 
+  // Enforce bit-for-bit pixel integrity in metadata-only mode
+  const isMetadataOnly = disruptionMode === 'metadata-only';
+  const shouldRemoveBadge = options.removeVisibleBadge !== false && !isMetadataOnly;
+
   // 1. Erase Visible Gemini Sparkle Badge (Bottom-Right Corner)
-  if (options.removeVisibleBadge !== false) {
+  if (shouldRemoveBadge) {
     logs.push(`[PROCESS] Auto-erasing visible Gemini sparkle watermark via Reverse Alpha Blending...`);
     const badgeResult = await removeCornerBadge(currentBuffer);
     currentBuffer = badgeResult.buffer;
@@ -447,6 +466,8 @@ export async function processImagePipeline(
     } else {
       logs.push(`[SUCCESS] Corner scan complete.`);
     }
+  } else if (isMetadataOnly) {
+    logs.push(`[INFO] Metadata-only mode active: visual badge removal bypassed to preserve bit-for-bit pixel integrity.`);
   }
 
   // 2. Strip Metadata (C2PA Content Credentials, EXIF, XMP, IPTC, ICC)
@@ -457,7 +478,7 @@ export async function processImagePipeline(
   }
 
   // 3. Disrupt Embedded Signals (SynthID & OpenAI Verifier Evasion)
-  if (options.disruptSignals !== false && disruptionMode !== 'metadata-only') {
+  if (options.disruptSignals !== false && !isMetadataOnly) {
     logs.push(`[PROCESS] Executing ${disruptionMode.toUpperCase()} frequency-domain signal disruption (Strength: ${disruptionStrength}%)...`);
     logs.push(`[PROCESS] Applying chrominance phase shift and anisotropic Lanczos-3 grid realignment...`);
     logs.push(`[PROCESS] Performing internal Mozjpeg trellis DCT quantization cycle...`);
@@ -470,13 +491,13 @@ export async function processImagePipeline(
       disruptionStrength
     );
     logs.push(`[SUCCESS] SynthID and OpenAI spatial frequency carrier waves neutralized.`);
-  } else if (disruptionMode === 'metadata-only') {
-    logs.push(`[INFO] Metadata-only mode active: pixel data preserved losslessly.`);
+  } else if (isMetadataOnly) {
+    logs.push(`[INFO] Metadata-only mode active: pixel matrix preserved bit-for-bit.`);
   }
 
-  // 4. Perform Real Byte-Level Provenance Audit on Output Buffer
+  // 4. Perform Real Byte-Level Forensic Provenance Audit on Output Buffer
   const provenanceAudit = scanBufferProvenance(currentBuffer);
-  logs.push(`[AUDIT] Scanned ${provenanceAudit.bytesScanned} output bytes (${provenanceAudit.formatDetected}): C2PA=${provenanceAudit.c2paFound ? 'FOUND' : 'CLEAN'}, EXIF=${provenanceAudit.exifFound ? 'FOUND' : 'CLEAN'}, XMP=${provenanceAudit.xmpFound ? 'FOUND' : 'CLEAN'}`);
+  logs.push(`[AUDIT] Scanned ${provenanceAudit.bytesScanned} output bytes (${provenanceAudit.formatDetected}): C2PA=${provenanceAudit.c2paFound ? 'FOUND' : 'CLEAN'}, EXIF=${provenanceAudit.exifFound ? 'FOUND' : 'CLEAN'}, XMP=${provenanceAudit.xmpFound ? 'FOUND' : 'CLEAN'}, ICC=${provenanceAudit.iccFound ? 'FOUND' : 'CLEAN'}, IPTC=${provenanceAudit.iptcFound ? 'FOUND' : 'CLEAN'}`);
 
   const executionTimeMs = Date.now() - startTime;
   logs.push(`[COMPLETE] Pipeline finished in ${executionTimeMs}ms. Final size: ${(currentBuffer.length / 1024).toFixed(1)} KB`);
@@ -488,9 +509,9 @@ export async function processImagePipeline(
       processedSize: currentBuffer.length,
       dimensions: { width, height },
       metadataStripped: options.stripMetadata !== false,
-      signalsDisrupted: options.disruptSignals !== false && disruptionMode !== 'metadata-only',
+      signalsDisrupted: options.disruptSignals !== false && !isMetadataOnly,
       disruptionMode,
-      badgeRemoved: options.removeVisibleBadge !== false,
+      badgeRemoved: shouldRemoveBadge,
       badgeDetails,
       provenanceAudit,
       executionTimeMs,

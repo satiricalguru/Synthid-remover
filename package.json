@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "node scripts/verify-pipeline.mjs"
+    "test": "tsx scripts/verify-pipeline.mjs"
   },
   "dependencies": {
     "@pilio/gemini-watermark-remover": "^1.0.31",
@@ -28,6 +28,7 @@
     "autoprefixer": "^10.4.19",
     "postcss": "^8.4.39",
     "tailwindcss": "^3.4.4",
+    "tsx": "^4.23.15",
     "typescript": "^5.5.2"
   }
 }

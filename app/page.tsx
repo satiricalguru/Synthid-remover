@@ -506,10 +506,11 @@ export default function LandingPage() {
                           </label>
 
                           {/* Option 3: Auto-Erase Visible Gemini Sparkle Badge */}
-                          <label className="flex items-start gap-3 cursor-pointer">
+                          <label className={`flex items-start gap-3 ${disruptionMode === 'metadata-only' ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}>
                             <input
                               type="checkbox"
-                              checked={removeVisibleBadge}
+                              checked={disruptionMode === 'metadata-only' ? false : removeVisibleBadge}
+                              disabled={disruptionMode === 'metadata-only'}
                               onChange={(e) => setRemoveVisibleBadge(e.target.checked)}
                               className="mt-0.5 h-4 w-4 rounded border-neutral-300 dark:border-neutral-700 bg-white dark:bg-black accent-black dark:accent-white"
                             />
@@ -518,7 +519,9 @@ export default function LandingPage() {
                                 Auto-Erase Visible Gemini Sparkle Badge
                               </span>
                               <p className="text-[11px] text-neutral-600 dark:text-neutral-400">
-                                Erases corner badges with adaptive Reverse Alpha Blending.
+                                {disruptionMode === 'metadata-only'
+                                  ? 'Bypassed in Metadata-Only mode to preserve 100% bit-for-bit lossless pixel integrity.'
+                                  : 'Erases corner badges with adaptive Reverse Alpha Blending.'}
                               </p>
                             </div>
                           </label>
