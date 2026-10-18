@@ -96,6 +96,15 @@ export const InpaintCanvas: React.FC<InpaintCanvasProps> = ({
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     setIsDrawing(true);
+    const canvas = maskCanvasRef.current;
+    if (canvas) {
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        const { x, y } = getCanvasCoordinates(e);
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+      }
+    }
     draw(e);
   };
 

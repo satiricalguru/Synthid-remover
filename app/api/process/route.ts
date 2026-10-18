@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { processImagePipeline } from '@/lib/imageProcessor';
+import { processImagePipeline, DisruptionMode } from '@/lib/imageProcessor';
 
 export async function POST(req: NextRequest) {
   try {
@@ -9,6 +9,9 @@ export async function POST(req: NextRequest) {
     const disruptSignals = formData.get('disruptSignals') !== 'false';
     const removeVisibleBadge = formData.get('removeVisibleBadge') !== 'false';
     const format = (formData.get('format') as 'jpeg' | 'png' | 'webp') || 'png';
+    const disruptionMode = (formData.get('disruptionMode') as DisruptionMode) || 'balanced';
+    const rawStrength = formData.get('disruptionStrength');
+    const disruptionStrength = rawStrength ? parseInt(String(rawStrength), 10) : 75;
 
     if (!file) {
       return NextResponse.json(
@@ -24,6 +27,8 @@ export async function POST(req: NextRequest) {
     const { buffer: processedBuffer, telemetry } = await processImagePipeline(inputBuffer, {
       stripMetadata,
       disruptSignals,
+      disruptionMode,
+      disruptionStrength,
       removeVisibleBadge,
       targetFormat: format,
       quality: 95,
