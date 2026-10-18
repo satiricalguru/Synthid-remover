@@ -42,6 +42,7 @@ export default function LandingPage() {
     processedSize?: number;
     disruptionMode?: DisruptionMode;
     badgeDetails?: any;
+    provenanceAudit?: any;
   }>({});
 
   // Options
@@ -119,6 +120,7 @@ export default function LandingPage() {
         processedSize: data.telemetry.processedSize,
         disruptionMode,
         badgeDetails: data.telemetry.badgeDetails,
+        provenanceAudit: data.telemetry.provenanceAudit,
       });
 
       // Save record to local browser storage
@@ -188,6 +190,7 @@ export default function LandingPage() {
         originalSize: data.telemetry.originalSize,
         processedSize: data.telemetry.processedSize,
         dimensions: data.telemetry.dimensions,
+        provenanceAudit: data.telemetry.provenanceAudit,
       });
 
       saveLocalJob({
@@ -557,23 +560,50 @@ export default function LandingPage() {
                             className="max-h-[380px] w-auto object-contain rounded-lg border border-neutral-300 dark:border-neutral-800 shadow-xl"
                           />
 
-                          {/* Verification Audit Badges */}
-                          <div className="w-full grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
-                            <div className="flex items-center gap-1.5 p-2 rounded-lg bg-neutral-200/60 dark:bg-neutral-800/60 text-[11px]">
-                              <CheckCircle className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-                              <span className="truncate">C2PA: <strong>Wiped</strong></span>
+                          {/* Real Byte-Level Provenance Audit Panel */}
+                          <div className="w-full flex flex-col gap-2 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-100 dark:bg-neutral-900/60 p-3">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="font-semibold text-black dark:text-white flex items-center gap-1.5">
+                                <ShieldCheck className="h-4 w-4 text-emerald-500" />
+                                <span>Real-Time Binary Provenance Audit</span>
+                              </span>
+                              <span className="font-mono text-[10px] text-neutral-500">
+                                {telemetryMeta.provenanceAudit ? `${telemetryMeta.provenanceAudit.bytesScanned} bytes inspected (${telemetryMeta.provenanceAudit.formatDetected})` : 'Byte scan ready'}
+                              </span>
                             </div>
-                            <div className="flex items-center gap-1.5 p-2 rounded-lg bg-neutral-200/60 dark:bg-neutral-800/60 text-[11px]">
-                              <CheckCircle className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-                              <span className="truncate">EXIF: <strong>Purged</strong></span>
-                            </div>
-                            <div className="flex items-center gap-1.5 p-2 rounded-lg bg-neutral-200/60 dark:bg-neutral-800/60 text-[11px]">
-                              <CheckCircle className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-                              <span className="truncate">SynthID: <strong>Disrupted</strong></span>
-                            </div>
-                            <div className="flex items-center gap-1.5 p-2 rounded-lg bg-neutral-200/60 dark:bg-neutral-800/60 text-[11px]">
-                              <CheckCircle className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-                              <span className="truncate">Badge: <strong>Cleared</strong></span>
+
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-[11px]">
+                              <div className="flex items-center gap-1.5 p-2 rounded-lg bg-white dark:bg-black/40 border border-neutral-200 dark:border-neutral-800">
+                                {telemetryMeta.provenanceAudit?.c2paFound ? (
+                                  <span className="text-amber-500 font-bold shrink-0">⚠️</span>
+                                ) : (
+                                  <CheckCircle className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                                )}
+                                <span className="truncate">C2PA (JUMBF): <strong className={telemetryMeta.provenanceAudit?.c2paFound ? 'text-amber-500' : 'text-emerald-500'}>{telemetryMeta.provenanceAudit?.c2paFound ? 'Found' : 'Clean (0)'}</strong></span>
+                              </div>
+
+                              <div className="flex items-center gap-1.5 p-2 rounded-lg bg-white dark:bg-black/40 border border-neutral-200 dark:border-neutral-800">
+                                {telemetryMeta.provenanceAudit?.exifFound ? (
+                                  <span className="text-amber-500 font-bold shrink-0">⚠️</span>
+                                ) : (
+                                  <CheckCircle className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                                )}
+                                <span className="truncate">EXIF Header: <strong className={telemetryMeta.provenanceAudit?.exifFound ? 'text-amber-500' : 'text-emerald-500'}>{telemetryMeta.provenanceAudit?.exifFound ? 'Found' : 'Clean (0)'}</strong></span>
+                              </div>
+
+                              <div className="flex items-center gap-1.5 p-2 rounded-lg bg-white dark:bg-black/40 border border-neutral-200 dark:border-neutral-800">
+                                {telemetryMeta.provenanceAudit?.xmpFound ? (
+                                  <span className="text-amber-500 font-bold shrink-0">⚠️</span>
+                                ) : (
+                                  <CheckCircle className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                                )}
+                                <span className="truncate">XMP Schemas: <strong className={telemetryMeta.provenanceAudit?.xmpFound ? 'text-amber-500' : 'text-emerald-500'}>{telemetryMeta.provenanceAudit?.xmpFound ? 'Found' : 'Clean (0)'}</strong></span>
+                              </div>
+
+                              <div className="flex items-center gap-1.5 p-2 rounded-lg bg-white dark:bg-black/40 border border-neutral-200 dark:border-neutral-800">
+                                <CheckCircle className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                                <span className="truncate">DCT Carrier: <strong className="text-emerald-500">{disruptionMode === 'metadata-only' ? 'Untouched' : 'Disrupted'}</strong></span>
+                              </div>
                             </div>
                           </div>
 

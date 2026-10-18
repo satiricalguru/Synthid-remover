@@ -12,6 +12,97 @@ export interface ClientProcessingOptions {
   quality?: number;
 }
 
+export interface ClientProvenanceAudit {
+  c2paFound: boolean;
+  exifFound: boolean;
+  xmpFound: boolean;
+  clean: boolean;
+  bytesScanned: number;
+  formatDetected: string;
+}
+
+/**
+ * Scans base64 image data bytes on client side to verify absence of C2PA, EXIF, and XMP chunks.
+ */
+export function scanBase64Provenance(base64Data: string): ClientProvenanceAudit {
+  const binaryString = atob(base64Data.split(',')[1] || '');
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+
+  let c2pa = false;
+  let exif = false;
+  let xmp = false;
+  let format = 'unknown';
+
+  // PNG
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
+    format = 'PNG';
+    let offset = 8;
+    while (offset + 8 <= bytes.length) {
+      const chunkLen = (bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3];
+      const chunkType = String.fromCharCode(bytes[offset + 4], bytes[offset + 5], bytes[offset + 6], bytes[offset + 7]);
+      if (chunkType === 'eXIf') exif = true;
+      if (chunkType === 'iTXt' || chunkType === 'tEXt' || chunkType === 'zTXt') {
+        let chunkText = '';
+        const maxText = Math.min(bytes.length, offset + 8 + Math.min(chunkLen, 120));
+        for (let j = offset + 8; j < maxText; j++) {
+          chunkText += String.fromCharCode(bytes[j]);
+        }
+        if (/c2pa|contentcredentials/i.test(chunkText)) c2pa = true;
+        if (/xmp|ns\.adobe/i.test(chunkText)) xmp = true;
+        if (/exif/i.test(chunkText)) exif = true;
+      }
+      offset += 12 + chunkLen;
+    }
+  }
+  // JPEG
+  else if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xd8) {
+    format = 'JPEG';
+    let offset = 2;
+    while (offset + 4 <= bytes.length) {
+      if (bytes[offset] !== 0xff) break;
+      const marker = bytes[offset + 1];
+      if (marker === 0xda || marker === 0xd9) break;
+      const markerLen = (bytes[offset + 2] << 8) | bytes[offset + 3];
+      if (marker === 0xe1) {
+        let payload = '';
+        const maxP = Math.min(bytes.length, offset + 4 + Math.min(markerLen - 2, 40));
+        for (let j = offset + 4; j < maxP; j++) {
+          payload += String.fromCharCode(bytes[j]);
+        }
+        if (payload.startsWith('Exif')) exif = true;
+        if (payload.includes('ns.adobe.com') || payload.includes('XMP')) xmp = true;
+      }
+      if (marker === 0xeb) c2pa = true;
+      offset += 2 + markerLen;
+    }
+  }
+  // WebP
+  else if (bytes.length >= 12 && String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]) === 'RIFF') {
+    format = 'WEBP';
+    let offset = 12;
+    while (offset + 8 <= bytes.length) {
+      const chunkId = String.fromCharCode(bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]);
+      const chunkLen = bytes[offset + 4] | (bytes[offset + 5] << 8) | (bytes[offset + 6] << 16) | (bytes[offset + 7] << 24);
+      if (chunkId === 'EXIF') exif = true;
+      if (chunkId === 'XMP ') xmp = true;
+      offset += 8 + chunkLen + (chunkLen % 2);
+    }
+  }
+
+  return {
+    c2paFound: c2pa,
+    exifFound: exif,
+    xmpFound: xmp,
+    clean: !c2pa && !exif && !xmp,
+    bytesScanned: bytes.length,
+    formatDetected: format,
+  };
+}
+
 export async function processImageClientSide(
   file: File,
   options: ClientProcessingOptions = {}
@@ -70,8 +161,8 @@ export async function processImageClientSide(
 
     // Step 2A: Chrominance-targeted microscopic frequency dither
     const data = imageData.data;
-    const noiseScale = disruptionMode === 'aggressive' ? (disruptionStrength / 100) * 3.5 : (disruptionStrength / 100) * 1.8;
-    const ditherProb = disruptionMode === 'aggressive' ? 0.75 : 0.5;
+    const noiseScale = disruptionMode === 'aggressive' ? (disruptionStrength / 100) * 3.6 : (disruptionStrength / 100) * 2.0;
+    const ditherProb = disruptionMode === 'aggressive' ? 0.75 : 0.55;
 
     for (let i = 0; i < data.length; i += 4) {
       if (Math.random() < ditherProb) {
@@ -80,17 +171,19 @@ export async function processImageClientSide(
         data[i + 2] = Math.min(255, Math.max(0, Math.round(data[i + 2] - jitter)));
 
         if (disruptionMode === 'aggressive') {
-          const lumaJitter = (Math.random() - 0.5) * (noiseScale * 0.4);
+          const lumaJitter = (Math.random() - 0.5) * (noiseScale * 0.35);
           data[i + 1] = Math.min(255, Math.max(0, Math.round(data[i + 1] + lumaJitter)));
         }
       }
     }
     ctx.putImageData(imageData, 0, 0);
 
-    // Step 2B: Non-integer geometric resampling to disrupt rigid convolutional receptive fields
-    const scaleFactor = disruptionMode === 'aggressive' ? 0.968 : 0.982;
-    const scaledW = Math.max(16, Math.round(canvas.width * scaleFactor));
-    const scaledH = Math.max(16, Math.round(canvas.height * scaleFactor));
+    // Step 2B: Anisotropic non-uniform geometric squeeze & stretch
+    // Breaks orthogonal 8x8 DCT grid and rectangular convolutional receptive fields
+    const scaleX = disruptionMode === 'aggressive' ? 0.968 : 0.984;
+    const scaleY = disruptionMode === 'aggressive' ? 0.955 : 0.972;
+    const scaledW = Math.max(16, Math.round(canvas.width * scaleX));
+    const scaledH = Math.max(16, Math.round(canvas.height * scaleY));
 
     const tempCanvas = document.createElement('canvas');
     tempCanvas.width = scaledW;
@@ -108,7 +201,7 @@ export async function processImageClientSide(
       ctx.drawImage(tempCanvas, 0, 0, canvas.width, canvas.height);
     }
 
-    logs.push(`[SUCCESS] Spatial frequency phase shift and non-integer grid realignment completed.`);
+    logs.push(`[SUCCESS] Chrominance phase shift and anisotropic grid realignment completed.`);
   } else if (disruptionMode === 'metadata-only') {
     logs.push(`[INFO] Metadata-only mode active: preserving pixel data.`);
   }
@@ -124,6 +217,10 @@ export async function processImageClientSide(
   const exportQuality = options.quality ? options.quality / 100 : 0.95;
   const base64Image = canvas.toDataURL(mimeType, exportQuality);
 
+  // 4. Perform Real Byte-Level Provenance Audit on Client Base64
+  const provenanceAudit = scanBase64Provenance(base64Image);
+  logs.push(`[AUDIT] Scanned ${provenanceAudit.bytesScanned} bytes (${provenanceAudit.formatDetected}): C2PA=${provenanceAudit.c2paFound ? 'FOUND' : 'CLEAN'}, EXIF=${provenanceAudit.exifFound ? 'FOUND' : 'CLEAN'}, XMP=${provenanceAudit.xmpFound ? 'FOUND' : 'CLEAN'}`);
+
   const executionTimeMs = Date.now() - startTime;
   logs.push(`[COMPLETE] Pipeline finished in ${executionTimeMs}ms (Browser Memory).`);
 
@@ -137,6 +234,7 @@ export async function processImageClientSide(
       signalsDisrupted: options.disruptSignals !== false && disruptionMode !== 'metadata-only',
       disruptionMode,
       badgeRemoved: options.removeVisibleBadge !== false,
+      provenanceAudit,
       executionTimeMs,
       logs,
     },
@@ -234,7 +332,6 @@ export async function inpaintImageClientSide(
         const maskLum = mask[idx];
 
         if (maskAlpha > 30 || maskLum > 30) {
-          // Average valid neighbors
           let rSum = 0, gSum = 0, bSum = 0, count = 0;
           const radius = 3;
           for (let dy = -radius; dy <= radius; dy++) {
@@ -265,20 +362,11 @@ export async function inpaintImageClientSide(
 
   ctx.putImageData(imgData, 0, 0);
 
-  // Subtle blur pass over masked area to eliminate sharp seam edges
-  const blurCanvas = document.createElement('canvas');
-  blurCanvas.width = width;
-  blurCanvas.height = height;
-  const blurCtx = blurCanvas.getContext('2d');
-  if (blurCtx) {
-    blurCtx.filter = 'blur(4px)';
-    blurCtx.drawImage(canvas, 0, 0);
-  }
-
   logs.push(`[CLIENT INPAINT] Reconstructed patch composited smoothly.`);
   logs.push(`[SUCCESS] Wiped C2PA Content Credentials and EXIF metadata.`);
 
   const base64Image = canvas.toDataURL('image/webp', 0.95);
+  const provenanceAudit = scanBase64Provenance(base64Image);
   const executionTimeMs = Date.now() - startTime;
   logs.push(`[COMPLETE] Client inpainting finished in ${executionTimeMs}ms.`);
 
@@ -288,6 +376,7 @@ export async function inpaintImageClientSide(
       originalSize: imageFile.size,
       processedSize: Math.round(base64Image.length * 0.75),
       dimensions: { width, height },
+      provenanceAudit,
       executionTimeMs,
       logs,
     },

@@ -6,7 +6,8 @@
     "dev": "(lsof -ti:3000 | xargs kill -9 2>/dev/null || true) && (next dev & sleep 2 && open http://localhost:3000)",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "node scripts/verify-pipeline.mjs"
   },
   "dependencies": {
     "@pilio/gemini-watermark-remover": "^1.0.31",
