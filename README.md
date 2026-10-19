@@ -78,10 +78,12 @@ This update addresses community feedback from our GitHub issue tracker:
   1. **Sharp Metadata Retention:** In previous builds, Sharp's `withMetadata(false as any)` was mistakenly called. In Sharp, passing options to `.withMetadata()` actually *preserved* container metadata. Consequently, cryptographically signed **C2PA Content Credentials** (JUMBF binary manifests) remained in the file, causing OpenAI's verifier to identify the image immediately via manifest inspection.
   2. **Insufficient Frequency Disruption:** Steganographic watermarks survived basic integer noise ($\pm 1$ RGB).
 * **Fix Applied:**
-  - Complete elimination of `.withMetadata()` calls. All images are decoded to raw RGBA buffers and re-containerized from scratch.
-  - Anisotropic Lanczos-3 phase resampling ($98.4\% \times 97.2\%$) to break rectangular CNN receptive fields.
-  - Mandatory internal Mozjpeg lossy pass with trellis quantization to quantize high-frequency DCT harmonics.
-  - Added binary byte-level scanner in `lib/imageProcessor.ts` to assert that zero C2PA chunks exist in exported files.
+  - **Zero-Metadata Container Synthesis:** Complete elimination of `.withMetadata()` calls. Images are decoded to raw uncompressed RGBA pixel buffers and re-containerized from scratch with zero headers.
+  - **Non-Linear Order-Statistic Phase Scrubbing:** Added a 3x3 median spatial filter pass (`.median(3)` in Sharp; SIMD-style typed array median filter in browser Canvas) to eliminate high-frequency steganographic outlier perturbations without blurring structural contours.
+  - **Asymmetric Coordinate Desynchronization:** Cubic/bilinear resampling with asymmetric aspect shifts ($97.5\% \times 96.5\%$ in Aggressive mode) to decouple rectangular CNN receptive fields while explicitly preventing Lanczos sinc harmonic carrier wave re-interpolation.
+  - **Targeted DCT Trellis Quantization:** Internal Mozjpeg lossy pass with 4:2:0 chroma subsampling and trellis quantization (Q78 in Aggressive, Q84 in Balanced), with alpha-preserving lossy WebP fallback for transparent PNGs.
+  - **Zero-Carrier Sharpening:** Clamped flat-field sharpen slope to `m1: 0.0` so steganographic low-amplitude residual noise in smooth and flat regions is never re-amplified.
+  - **Automated Forensic Verification:** Integrated byte-level binary parser scanning every PNG chunk (`caBX`, `eXIf`, `iTXt`), JPEG marker (`APP1`, `APP11`, `APP13`), and WebP RIFF chunk in both unit tests (`npm test`) and client telemetry.
 
 ---
 

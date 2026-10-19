@@ -121,6 +121,47 @@ export function scanBase64Provenance(base64Data: string): ClientProvenanceAudit 
   };
 }
 
+/**
+ * Fast client-side 3x3 median order-statistic filter on ImageData.
+ * Eliminates steganographic outlier noise without blurring sharp image edges.
+ */
+function applyMedianFilter3x3(imageData: ImageData): ImageData {
+  const { width: w, height: h, data: src } = imageData;
+  const output = new ImageData(w, h);
+  const dst = output.data;
+  dst.set(src); // Copy baseline (including borders)
+
+  const winR = new Uint8Array(9);
+  const winG = new Uint8Array(9);
+  const winB = new Uint8Array(9);
+
+  for (let y = 1; y < h - 1; y++) {
+    const rowOffset = y * w * 4;
+    for (let x = 1; x < w - 1; x++) {
+      let k = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        const srcOffset = (y + dy) * w * 4 + (x - 1) * 4;
+        for (let dx = 0; dx < 3; dx++) {
+          const idx = srcOffset + dx * 4;
+          winR[k] = src[idx];
+          winG[k] = src[idx + 1];
+          winB[k] = src[idx + 2];
+          k++;
+        }
+      }
+      const dstIdx = rowOffset + x * 4;
+      winR.sort();
+      winG.sort();
+      winB.sort();
+      dst[dstIdx] = winR[4];
+      dst[dstIdx + 1] = winG[4];
+      dst[dstIdx + 2] = winB[4];
+      // preserve alpha as-is
+    }
+  }
+  return output;
+}
+
 export async function processImageClientSide(
   file: File,
   options: ClientProcessingOptions = {}
@@ -203,12 +244,19 @@ export async function processImageClientSide(
         }
       }
     }
+
+    // Step 2B: Non-linear order-statistic filtering (Aggressive mode)
+    // Strips steganographic outlier noise without destroying coherent visual edges
+    if (disruptionMode === 'aggressive') {
+      imageData = applyMedianFilter3x3(imageData);
+      logs.push(`[PROCESS] 3x3 median order-statistic spatial filter applied.`);
+    }
     ctx.putImageData(imageData, 0, 0);
 
-    // Step 2B: Anisotropic non-uniform geometric squeeze & stretch
+    // Step 2C: Anisotropic non-uniform geometric coordinate desynchronization
     // Breaks orthogonal 8x8 DCT grid and rectangular convolutional receptive fields
-    const scaleX = disruptionMode === 'aggressive' ? 0.968 : 0.984;
-    const scaleY = disruptionMode === 'aggressive' ? 0.955 : 0.972;
+    const scaleX = disruptionMode === 'aggressive' ? 0.975 : 0.988;
+    const scaleY = disruptionMode === 'aggressive' ? 0.965 : 0.978;
     const scaledW = Math.max(16, Math.round(canvas.width * scaleX));
     const scaledH = Math.max(16, Math.round(canvas.height * scaleY));
 
@@ -228,11 +276,11 @@ export async function processImageClientSide(
       ctx.drawImage(tempCanvas, 0, 0, canvas.width, canvas.height);
     }
 
-    // Step 2C: Mandatory Internal Lossy Round-Trip (DCT Coefficient Quantization)
+    // Step 2D: Mandatory Internal Lossy Round-Trip (DCT Coefficient Quantization)
     // Runs an intermediate lossy cycle on canvas to quantize high-frequency DCT harmonics
     // before final export. If transparency is present, we use lossy WebP to avoid flattening
     // alpha onto black (#000000). For opaque images, we use lossy JPEG.
-    const internalQuality = disruptionMode === 'aggressive' ? 0.84 : 0.88;
+    const internalQuality = disruptionMode === 'aggressive' ? 0.78 : 0.84;
     const lossyMime = hasTransparency ? 'image/webp' : 'image/jpeg';
     const internalLossyDataUrl = canvas.toDataURL(lossyMime, internalQuality);
 

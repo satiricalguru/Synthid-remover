@@ -234,30 +234,32 @@ export async function disruptEmbeddedSignals(
     .png()
     .toBuffer();
 
-  // Step 4: Non-uniform Anisotropic Squeeze & Resampling
-  // Neural network detectors (like SynthID CNNs) rely on rigid coordinate grids and fixed rectangular receptive fields.
-  // Anisotropic scaling (different X vs Y ratios) desynchronizes convolutional kernels.
+  // Step 4: Non-linear Spatial Filtering & Anisotropic Resampling
+  // Neural network detectors (like SynthID CNNs) rely on rigid coordinate grids, fixed receptive fields,
+  // and subtle harmonic micro-correlations.
+  // 1. Median filtering (3x3) non-linearly eliminates isolated steganographic outlier noise
+  //    without destroying coherent structural boundaries.
+  // 2. Anisotropic scaling (different X vs Y ratios) desynchronizes convolutional kernels.
+  // 3. Resampling with cubic (not Lanczos sinc) prevents mathematical re-interpolation of the carrier wave.
   if (mode === 'aggressive') {
-    // 3-stage asymmetric anisotropic phase disruption
-    const squeezeW = Math.max(16, Math.round(width * 0.968));
-    const squeezeH = Math.max(16, Math.round(height * 0.955));
-    const stretchW = Math.round(width * 1.014);
-    const stretchH = Math.round(height * 1.008);
+    // Aggressive: 3x3 median order-statistic filter + asymmetric coordinate desynchronization
+    const squeezeW = Math.max(16, Math.round(width * 0.975));
+    const squeezeH = Math.max(16, Math.round(height * 0.965));
 
     currentBuffer = await sharp(currentBuffer)
-      .resize(squeezeW, squeezeH, { kernel: sharp.kernel.lanczos3, fit: 'fill' })
-      .resize(stretchW, stretchH, { kernel: sharp.kernel.cubic, fit: 'fill' })
-      .resize(width, height, { kernel: sharp.kernel.lanczos3, fit: 'fill' })
+      .median(3)
+      .resize(squeezeW, squeezeH, { kernel: sharp.kernel.cubic, fit: 'fill' })
+      .resize(width, height, { kernel: sharp.kernel.cubic, fit: 'fill' })
       .png()
       .toBuffer();
   } else {
-    // 2-stage balanced anisotropic Lanczos-3 phase disruption
-    const squeezeW = Math.max(16, Math.round(width * 0.984));
-    const squeezeH = Math.max(16, Math.round(height * 0.972));
+    // Balanced: 2-stage anisotropic phase disruption with cubic interpolation
+    const squeezeW = Math.max(16, Math.round(width * 0.988));
+    const squeezeH = Math.max(16, Math.round(height * 0.978));
 
     currentBuffer = await sharp(currentBuffer)
-      .resize(squeezeW, squeezeH, { kernel: sharp.kernel.lanczos3, fit: 'fill' })
-      .resize(width, height, { kernel: sharp.kernel.lanczos3, fit: 'fill' })
+      .resize(squeezeW, squeezeH, { kernel: sharp.kernel.cubic, fit: 'fill' })
+      .resize(width, height, { kernel: sharp.kernel.cubic, fit: 'fill' })
       .png()
       .toBuffer();
   }
@@ -269,7 +271,7 @@ export async function disruptEmbeddedSignals(
   // In that case, we use lossy WebP with alpha preservation; otherwise, we use Mozjpeg trellis quantization.
   let intermediateLossy: Buffer;
   if (!hasTransparency) {
-    const internalJpegQuality = mode === 'aggressive' ? 84 : 88;
+    const internalJpegQuality = mode === 'aggressive' ? 78 : 84;
     intermediateLossy = await sharp(currentBuffer)
       .jpeg({
         quality: internalJpegQuality,
@@ -280,7 +282,7 @@ export async function disruptEmbeddedSignals(
       })
       .toBuffer();
   } else {
-    const internalWebpQuality = mode === 'aggressive' ? 82 : 88;
+    const internalWebpQuality = mode === 'aggressive' ? 76 : 84;
     intermediateLossy = await sharp(currentBuffer)
       .webp({
         quality: internalWebpQuality,
@@ -290,12 +292,13 @@ export async function disruptEmbeddedSignals(
       .toBuffer();
   }
 
-  // Step 6: Detail Preservation / Subtle Unsharp Mask
-  // Re-accentuates high-contrast structural edges while keeping steganographic low-amplitude noise scrubbed
+  // Step 6: Detail Preservation (Zero Carrier Re-amplification)
+  // Re-accentuates high-contrast structural edges while keeping m1: 0 (flat slope 0)
+  // so steganographic low-amplitude noise in smooth/flat regions is NOT re-amplified.
   let finalPipeline = sharp(intermediateLossy).sharpen({
-    sigma: mode === 'aggressive' ? 0.75 : 0.5,
-    m1: 0.5,
-    m2: 1.5,
+    sigma: mode === 'aggressive' ? 0.65 : 0.5,
+    m1: 0.0, // Critical: 0 slope for flat areas prevents reviving carrier patterns
+    m2: mode === 'aggressive' ? 1.2 : 1.0,
   });
 
   // Step 7: Final clean export in requested format with NO metadata headers

@@ -29,3 +29,7 @@ next-env.d.ts
 # OS files
 .DS_Store
 *.pem
+
+# Test images & temporary evaluation artifacts
+test_*.png
+output_*.png
