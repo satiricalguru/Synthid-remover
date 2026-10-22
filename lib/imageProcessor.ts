@@ -255,16 +255,181 @@ function applyBilateralCarrierDisruption(
 }
 
 /**
+ * 1D in-place radix-2 Cooley-Tukey Fast Fourier Transform.
+ */
+function fft1d(re: Float64Array, im: Float64Array, n: number, inv: boolean = false): void {
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) {
+      const tr = re[i]; re[i] = re[j]; re[j] = tr;
+      const ti = im[i]; im[i] = im[j]; im[j] = ti;
+    }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = (inv ? 2 : -2) * Math.PI / len;
+    const wlen_r = Math.cos(ang), wlen_i = Math.sin(ang);
+    for (let i = 0; i < n; i += len) {
+      let wr = 1, wi = 0;
+      const halfLen = len >> 1;
+      for (let j = 0; j < halfLen; j++) {
+        const u_r = re[i + j], u_i = im[i + j];
+        const v_r = re[i + j + halfLen] * wr - im[i + j + halfLen] * wi;
+        const v_i = re[i + j + halfLen] * wi + im[i + j + halfLen] * wr;
+        re[i + j] = u_r + v_r;
+        im[i + j] = u_i + v_i;
+        re[i + j + halfLen] = u_r - v_r;
+        im[i + j + halfLen] = u_i - v_i;
+        const n_wr = wr * wlen_r - wi * wlen_i;
+        wi = wr * wlen_i + wi * wlen_r;
+        wr = n_wr;
+      }
+    }
+  }
+  if (inv) {
+    const invN = 1 / n;
+    for (let i = 0; i < n; i++) {
+      re[i] *= invN;
+      im[i] *= invN;
+    }
+  }
+}
+
+/**
+ * 2D Fast Fourier Transform on an N x N power-of-two matrix.
+ */
+function fft2d(re: Float64Array, im: Float64Array, N: number, inv: boolean = false): void {
+  for (let y = 0; y < N; y++) {
+    const rowOffset = y * N;
+    const r_r = re.subarray(rowOffset, rowOffset + N);
+    const r_i = im.subarray(rowOffset, rowOffset + N);
+    fft1d(r_r, r_i, N, inv);
+  }
+  const col_r = new Float64Array(N);
+  const col_i = new Float64Array(N);
+  for (let x = 0; x < N; x++) {
+    for (let y = 0; y < N; y++) {
+      col_r[y] = re[y * N + x];
+      col_i[y] = im[y * N + x];
+    }
+    fft1d(col_r, col_i, N, inv);
+    for (let y = 0; y < N; y++) {
+      re[y * N + x] = col_r[y];
+      im[y * N + x] = col_i[y];
+    }
+  }
+}
+
+/**
+ * 16-32 Pixel Octave Cartesian Fourier Phase Scramble on Luminance (Y).
+ *
+ * Ground-truth research findings (wiltodelta/remove-ai-watermarks against OpenAI official verifier):
+ * DeepMind SynthID embeds carrier energy primarily in the Luminance (Y) channel within the
+ * 16-32 pixel period octave (spatial frequency radius k in [N/32, N/16]).
+ * High frequencies (< 8 px) are avoided by DeepMind so watermarks survive compression/downscaling.
+ *
+ * Scrambling the phase angle theta(u, v) in this exact frequency annulus while strictly preserving
+ * Fourier magnitude |F(u, v)| and Hermitian conjugate symmetry decorrelates the matched filter
+ * detector, causing official SynthID verifiers to flip to 'not_detected' at ~19-25 dB PSNR.
+ */
+export function applyFourierOctaveScramble(
+  pixels: Uint8ClampedArray,
+  w: number,
+  h: number,
+  channels: number = 4
+): Uint8ClampedArray {
+  let N = 2;
+  while (N < Math.max(w, h)) N <<= 1;
+
+  const re = new Float64Array(N * N);
+  const im = new Float64Array(N * N);
+  const Y_orig = new Float64Array(w * h);
+
+  // Reflection-padded Luminance (Y) initialization prevents boundary Gibbs artifacts
+  for (let y = 0; y < N; y++) {
+    const srcY = y < h ? y : (h - 1) - ((y - h) % h);
+    for (let x = 0; x < N; x++) {
+      const srcX = x < w ? x : (w - 1) - ((x - w) % w);
+      const pIdx = (srcY * w + srcX) * channels;
+      const yVal = 0.299 * pixels[pIdx] + 0.587 * pixels[pIdx + 1] + 0.114 * pixels[pIdx + 2];
+      if (y < h && x < w) {
+        Y_orig[y * w + x] = yVal;
+      }
+      re[y * N + x] = yVal;
+    }
+  }
+
+  // Forward 2D FFT
+  fft2d(re, im, N, false);
+
+  // Frequency band corresponding to spatial wavelength 16..32 pixels: k = N / period
+  const minK = N / 32;
+  const maxK = N / 16;
+
+  for (let ky = 0; ky <= N / 2; ky++) {
+    const kv = ky <= N / 2 ? ky : ky - N;
+    const kxMax = (ky === 0 || ky === N / 2) ? N / 2 : N;
+    for (let kx = 0; kx < kxMax; kx++) {
+      const ku = kx <= N / 2 ? kx : kx - N;
+      const k = Math.sqrt(ku * ku + kv * kv);
+
+      if (k >= minK && k <= maxK) {
+        const idx = ky * N + kx;
+        const mag = Math.sqrt(re[idx] * re[idx] + im[idx] * im[idx]);
+        const newPhase = (Math.random() * 2 - 1) * Math.PI;
+
+        const newRe = mag * Math.cos(newPhase);
+        const newIm = mag * Math.sin(newPhase);
+
+        re[idx] = newRe;
+        im[idx] = newIm;
+
+        // Hermitian conjugate symmetry: F(-u, -v) = F*(u, v) ensures real-valued spatial result
+        const conjX = (N - kx) % N;
+        const conjY = (N - ky) % N;
+        const conjIdx = conjY * N + conjX;
+
+        re[conjIdx] = newRe;
+        im[conjIdx] = -newIm;
+      }
+    }
+  }
+
+  // Inverse 2D FFT
+  fft2d(re, im, N, true);
+
+  const output = new Uint8ClampedArray(pixels.length);
+  output.set(pixels);
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const pIdx = (y * w + x) * channels;
+      const yIdx = y * w + x;
+      const deltaY = re[y * N + x] - Y_orig[yIdx];
+
+      output[pIdx] = Math.min(255, Math.max(0, Math.round(pixels[pIdx] + deltaY)));
+      output[pIdx + 1] = Math.min(255, Math.max(0, Math.round(pixels[pIdx + 1] + deltaY)));
+      output[pIdx + 2] = Math.min(255, Math.max(0, Math.round(pixels[pIdx + 2] + deltaY)));
+      // alpha channel preserved
+    }
+  }
+
+  return output;
+}
+
+/**
  * Disrupts imperceptible embedded frequency-domain watermarks (such as Google SynthID
  * and OpenAI / DALL-E watermarks) across spatial, frequency, chroma, and geometric domains.
  *
  * Implements research-backed stages:
- * 1. Gradient-adaptive range bilateral smoothing (clearing carrier ripples in flat areas).
- * 2. Multi-band chrominance and luminance phase decorrelation.
- * 3. Non-uniform anisotropic spatial squeeze/stretch (breaking rectangular CNN receptive fields).
- * 4. Non-linear median order-statistic spatial filtering (in aggressive mode).
- * 5. Mandatory internal lossy JPEG round-trip (quantizing high-frequency DCT matrix harmonics).
- * 6. Structural detail restoration with zero carrier revival (m1: 0.0).
+ * 1. 16-32 px Cartesian Fourier phase scramble on Luminance (Y) in aggressive mode (wiltodelta).
+ * 2. Gradient-adaptive range bilateral smoothing (clearing carrier ripples in flat areas).
+ * 3. Multi-band chrominance and luminance phase decorrelation.
+ * 4. Non-uniform anisotropic spatial squeeze/stretch (breaking rectangular CNN receptive fields).
+ * 5. Non-linear median order-statistic spatial filtering (in aggressive mode).
+ * 6. Mandatory internal lossy JPEG round-trip (quantizing high-frequency DCT matrix harmonics).
+ * 7. Structural detail restoration with zero carrier revival (m1: 0.0).
  */
 export async function disruptEmbeddedSignals(
   inputBuffer: Buffer,
@@ -292,15 +457,23 @@ export async function disruptEmbeddedSignals(
   const pixelArray = new Uint8ClampedArray(rawPixels.buffer, rawPixels.byteOffset, rawPixels.byteLength);
   const totalChannels = info.channels; // 4 (RGBA)
 
-  // Step 2: Gradient-Adaptive Bilateral Carrier Disruption & Multi-Band Phase Decorrelation
-  // SynthID watermarks embed subtle carrier waves in both Chrominance (Cb/Cr) and Luminance (Y).
-  // In continuous-tone areas (skies, sunsets, flat backgrounds, water), median filters leave
-  // monotonic gradients untouched. Range-weighted bilateral smoothing extinguishes the carrier
-  // ripples in flat and smooth regions while preserving high-contrast structural edges.
+  // Step 2: 16-32 px Cartesian Fourier Phase Scramble (Aggressive Mode)
+  // DeepMind's SynthID embeds carrier energy primarily in Luminance within the 16-32 px
+  // octave band (spatial frequencies k in [N/32, N/16]). Scrambling phase in this annulus while
+  // preserving magnitude |F(u, v)| and conjugate symmetry decorrelates the matched filter detector,
+  // flipping official SynthID verifiers to 'not_detected' at ~19-25 dB PSNR (wiltodelta).
+  let currentPixels = pixelArray;
+  if (mode === 'aggressive') {
+    currentPixels = applyFourierOctaveScramble(currentPixels, width, height, totalChannels);
+  }
+
+  // Step 3: Gradient-Adaptive Bilateral Carrier Disruption & Multi-Band Phase Decorrelation
+  // In continuous-tone areas (skies, sunsets, flat backgrounds, water), bilateral smoothing
+  // extinguishes carrier ripples in smooth regions while preserving high-contrast structural edges.
   const sigmaR = mode === 'aggressive' ? 20 : 14;
   const noiseScale = mode === 'aggressive' ? (strength / 100) * 2.8 : (strength / 100) * 1.8;
   const { output: disruptedPixels, hasTransparency } = applyBilateralCarrierDisruption(
-    pixelArray,
+    currentPixels,
     width,
     height,
     totalChannels,
