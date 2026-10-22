@@ -33,3 +33,4 @@ next-env.d.ts
 # Test images & temporary evaluation artifacts
 test_*.png
 output_*.png
+user_test_*

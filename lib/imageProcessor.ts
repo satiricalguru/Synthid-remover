@@ -159,14 +159,112 @@ export async function stripMetadata(inputBuffer: Buffer, targetFormat: 'png' | '
 }
 
 /**
+ * Fast gradient-adaptive range-weighted bilateral filter & multi-band phase dither.
+ * Steganographic watermarks (such as Google SynthID) embed low-amplitude carrier waves
+ * across both Chrominance and Luminance channels. In continuous-tone / smooth regions
+ * (such as skies, sunsets, and water), median filtering alone leaves monotonic gradients
+ * intact. This bilateral filter computes local color range-similarity with a precomputed
+ * Gaussian LUT: neighboring pixels with small differences (below sigmaR) are smoothed
+ * together to extinguish carrier ripples, while high-contrast edges are strictly preserved.
+ */
+function applyBilateralCarrierDisruption(
+  pixels: Uint8ClampedArray,
+  w: number,
+  h: number,
+  channels: number,
+  sigmaR: number,
+  noiseScale: number,
+  mode: DisruptionMode
+): { output: Uint8ClampedArray; hasTransparency: boolean } {
+  const output = new Uint8ClampedArray(pixels.length);
+  output.set(pixels);
+
+  // Precomputed Gaussian range lookup table for delta [0..767]
+  const lut = new Float32Array(768);
+  const denom = 2 * sigmaR * sigmaR;
+  for (let d = 0; d < 768; d++) {
+    lut[d] = Math.exp(-(d * d) / denom);
+  }
+
+  const ditherProb = mode === 'aggressive' ? 0.70 : 0.50;
+  let hasTransparency = false;
+
+  for (let y = 1; y < h - 1; y++) {
+    const rowOffset = y * w * channels;
+    for (let x = 1; x < w - 1; x++) {
+      const idx = rowOffset + x * channels;
+      if (pixels[idx + 3] < 255) {
+        hasTransparency = true;
+      }
+
+      const r = pixels[idx];
+      const g = pixels[idx + 1];
+      const b = pixels[idx + 2];
+
+      let sumR = 0, sumG = 0, sumB = 0, totalW = 0;
+
+      for (let dy = -1; dy <= 1; dy++) {
+        const nRow = (y + dy) * w * channels;
+        for (let dx = -1; dx <= 1; dx++) {
+          const nIdx = nRow + (x + dx) * channels;
+          const nr = pixels[nIdx];
+          const ng = pixels[nIdx + 1];
+          const nb = pixels[nIdx + 2];
+
+          const diff = Math.abs(r - nr) + Math.abs(g - ng) + Math.abs(b - nb);
+          const weight = lut[diff];
+
+          sumR += nr * weight;
+          sumG += ng * weight;
+          sumB += nb * weight;
+          totalW += weight;
+        }
+      }
+
+      const invW = 1.0 / totalW;
+      let outR = sumR * invW;
+      let outG = sumG * invW;
+      let outB = sumB * invW;
+
+      // Multi-band phase decorrelation (both chrominance and luminance)
+      if (Math.random() < ditherProb) {
+        const jChroma = (Math.random() - 0.5) * noiseScale;
+        const jLuma = (Math.random() - 0.5) * (noiseScale * (mode === 'aggressive' ? 0.55 : 0.35));
+        outR = Math.min(255, Math.max(0, outR + jChroma + jLuma));
+        outG = Math.min(255, Math.max(0, outG + jLuma));
+        outB = Math.min(255, Math.max(0, outB - jChroma + jLuma));
+      }
+
+      output[idx] = Math.round(outR);
+      output[idx + 1] = Math.round(outG);
+      output[idx + 2] = Math.round(outB);
+    }
+  }
+
+  // Check border pixels for transparency as well
+  if (!hasTransparency) {
+    for (let i = 3; i < pixels.length; i += channels * 16) {
+      if (pixels[i] < 255) {
+        hasTransparency = true;
+        break;
+      }
+    }
+  }
+
+  return { output, hasTransparency };
+}
+
+/**
  * Disrupts imperceptible embedded frequency-domain watermarks (such as Google SynthID
  * and OpenAI / DALL-E watermarks) across spatial, frequency, chroma, and geometric domains.
  *
  * Implements research-backed stages:
- * 1. Targeted chrominance phase decorrelation.
- * 2. Non-uniform anisotropic spatial squeeze/stretch (breaking rectangular CNN receptive fields).
- * 3. Mandatory internal lossy JPEG round-trip (quantizing high-frequency DCT matrix harmonics).
- * 4. Structural detail restoration with subtle unsharp filter.
+ * 1. Gradient-adaptive range bilateral smoothing (clearing carrier ripples in flat areas).
+ * 2. Multi-band chrominance and luminance phase decorrelation.
+ * 3. Non-uniform anisotropic spatial squeeze/stretch (breaking rectangular CNN receptive fields).
+ * 4. Non-linear median order-statistic spatial filtering (in aggressive mode).
+ * 5. Mandatory internal lossy JPEG round-trip (quantizing high-frequency DCT matrix harmonics).
+ * 6. Structural detail restoration with zero carrier revival (m1: 0.0).
  */
 export async function disruptEmbeddedSignals(
   inputBuffer: Buffer,
@@ -194,37 +292,25 @@ export async function disruptEmbeddedSignals(
   const pixelArray = new Uint8ClampedArray(rawPixels.buffer, rawPixels.byteOffset, rawPixels.byteLength);
   const totalChannels = info.channels; // 4 (RGBA)
 
-  // Step 2: Chrominance-targeted microscopic frequency dither
-  // SynthID embeds high-energy watermarking in chrominance channels (Cb/Cr / U/V)
-  // because the human visual system is less sensitive to high-frequency chroma variations.
-  const noiseScale = mode === 'aggressive' ? (strength / 100) * 3.6 : (strength / 100) * 2.0;
-  const ditherProb = mode === 'aggressive' ? 0.75 : 0.55;
-
-  let hasTransparency = false;
-  for (let i = 0; i < pixelArray.length; i += totalChannels) {
-    if (pixelArray[i + 3] < 255) {
-      hasTransparency = true;
-    }
-
-    if (Math.random() < ditherProb) {
-      const r = pixelArray[i];
-      const g = pixelArray[i + 1];
-      const b = pixelArray[i + 2];
-
-      // Perturb red and blue in opposite directions to disrupt chrominance phase
-      const jitter = (Math.random() - 0.5) * noiseScale;
-      pixelArray[i] = Math.min(255, Math.max(0, Math.round(r + jitter)));
-      pixelArray[i + 2] = Math.min(255, Math.max(0, Math.round(b - jitter)));
-
-      if (mode === 'aggressive') {
-        const lumaJitter = (Math.random() - 0.5) * (noiseScale * 0.35);
-        pixelArray[i + 1] = Math.min(255, Math.max(0, Math.round(g + lumaJitter)));
-      }
-    }
-  }
+  // Step 2: Gradient-Adaptive Bilateral Carrier Disruption & Multi-Band Phase Decorrelation
+  // SynthID watermarks embed subtle carrier waves in both Chrominance (Cb/Cr) and Luminance (Y).
+  // In continuous-tone areas (skies, sunsets, flat backgrounds, water), median filters leave
+  // monotonic gradients untouched. Range-weighted bilateral smoothing extinguishes the carrier
+  // ripples in flat and smooth regions while preserving high-contrast structural edges.
+  const sigmaR = mode === 'aggressive' ? 20 : 14;
+  const noiseScale = mode === 'aggressive' ? (strength / 100) * 2.8 : (strength / 100) * 1.8;
+  const { output: disruptedPixels, hasTransparency } = applyBilateralCarrierDisruption(
+    pixelArray,
+    width,
+    height,
+    totalChannels,
+    sigmaR,
+    noiseScale,
+    mode
+  );
 
   // Step 3: Reconstruct uncompressed buffer from disrupted pixel array
-  let currentBuffer = await sharp(Buffer.from(pixelArray.buffer, pixelArray.byteOffset, pixelArray.byteLength), {
+  let currentBuffer = await sharp(Buffer.from(disruptedPixels.buffer, disruptedPixels.byteOffset, disruptedPixels.byteLength), {
     raw: {
       width: info.width,
       height: info.height,
@@ -237,14 +323,13 @@ export async function disruptEmbeddedSignals(
   // Step 4: Non-linear Spatial Filtering & Anisotropic Resampling
   // Neural network detectors (like SynthID CNNs) rely on rigid coordinate grids, fixed receptive fields,
   // and subtle harmonic micro-correlations.
-  // 1. Median filtering (3x3) non-linearly eliminates isolated steganographic outlier noise
-  //    without destroying coherent structural boundaries.
+  // 1. In aggressive mode, median filtering (3x3) eliminates isolated steganographic outlier noise.
   // 2. Anisotropic scaling (different X vs Y ratios) desynchronizes convolutional kernels.
   // 3. Resampling with cubic (not Lanczos sinc) prevents mathematical re-interpolation of the carrier wave.
   if (mode === 'aggressive') {
     // Aggressive: 3x3 median order-statistic filter + asymmetric coordinate desynchronization
-    const squeezeW = Math.max(16, Math.round(width * 0.975));
-    const squeezeH = Math.max(16, Math.round(height * 0.965));
+    const squeezeW = Math.max(16, Math.round(width * 0.972));
+    const squeezeH = Math.max(16, Math.round(height * 0.962));
 
     currentBuffer = await sharp(currentBuffer)
       .median(3)
@@ -254,8 +339,8 @@ export async function disruptEmbeddedSignals(
       .toBuffer();
   } else {
     // Balanced: 2-stage anisotropic phase disruption with cubic interpolation
-    const squeezeW = Math.max(16, Math.round(width * 0.988));
-    const squeezeH = Math.max(16, Math.round(height * 0.978));
+    const squeezeW = Math.max(16, Math.round(width * 0.986));
+    const squeezeH = Math.max(16, Math.round(height * 0.976));
 
     currentBuffer = await sharp(currentBuffer)
       .resize(squeezeW, squeezeH, { kernel: sharp.kernel.cubic, fit: 'fill' })
@@ -271,7 +356,7 @@ export async function disruptEmbeddedSignals(
   // In that case, we use lossy WebP with alpha preservation; otherwise, we use Mozjpeg trellis quantization.
   let intermediateLossy: Buffer;
   if (!hasTransparency) {
-    const internalJpegQuality = mode === 'aggressive' ? 78 : 84;
+    const internalJpegQuality = mode === 'aggressive' ? 76 : 82;
     intermediateLossy = await sharp(currentBuffer)
       .jpeg({
         quality: internalJpegQuality,
@@ -282,7 +367,7 @@ export async function disruptEmbeddedSignals(
       })
       .toBuffer();
   } else {
-    const internalWebpQuality = mode === 'aggressive' ? 76 : 84;
+    const internalWebpQuality = mode === 'aggressive' ? 74 : 82;
     intermediateLossy = await sharp(currentBuffer)
       .webp({
         quality: internalWebpQuality,
@@ -296,9 +381,9 @@ export async function disruptEmbeddedSignals(
   // Re-accentuates high-contrast structural edges while keeping m1: 0 (flat slope 0)
   // so steganographic low-amplitude noise in smooth/flat regions is NOT re-amplified.
   let finalPipeline = sharp(intermediateLossy).sharpen({
-    sigma: mode === 'aggressive' ? 0.65 : 0.5,
+    sigma: mode === 'aggressive' ? 0.6 : 0.5,
     m1: 0.0, // Critical: 0 slope for flat areas prevents reviving carrier patterns
-    m2: mode === 'aggressive' ? 1.2 : 1.0,
+    m2: mode === 'aggressive' ? 1.1 : 1.0,
   });
 
   // Step 7: Final clean export in requested format with NO metadata headers

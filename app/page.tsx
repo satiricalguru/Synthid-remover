@@ -65,6 +65,15 @@ export default function LandingPage() {
       `[SYSTEM] Image selected: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`,
       `[SYSTEM] Ready to process locally. Select pipeline options and click 'Run Pipeline'.`,
     ]);
+    // Match export format to input file container type by default
+    if (file.type === 'image/jpeg' || file.name.match(/\.(jpe?g)$/i)) {
+      setExportFormat('jpeg');
+    } else if (file.type === 'image/webp' || file.name.match(/\.webp$/i)) {
+      setExportFormat('webp');
+    } else {
+      setExportFormat('png');
+    }
+
     setTelemetryMeta({ originalSize: file.size });
   };
 

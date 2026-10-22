@@ -1,7 +1,10 @@
 import fs from 'fs';
+import path from 'path';
 import { fileURLToPath } from 'url';
 import sharp from 'sharp';
 import { processImagePipeline, scanBufferProvenance } from '../lib/imageProcessor.ts';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Helper function to calculate Mean Squared Error (MSE) and PSNR
 async function calculatePSNR(buf1, buf2) {
@@ -226,6 +229,59 @@ async function runVerificationSuite() {
   }
   console.log(`  ✅ Container re-encoding verified: detected format matches requested 'webp'.`);
 
+  // --------------------------------------------------------------------------
+  // FIXTURE 5: Authentic Community Issue #1 Asset (UPSOKen Sunset Photo)
+  // --------------------------------------------------------------------------
+  const upsokenPath = path.join(__dirname, '..', 'user_test_upsoken.jpg');
+  const communityResults = [];
+  if (fs.existsSync(upsokenPath)) {
+    console.log('\n[SETUP: FIXTURE 5] Loaded authentic community asset (user_test_upsoken.jpg)...');
+    const upsokenBuf = fs.readFileSync(upsokenPath);
+
+    for (const mode of testModes) {
+      console.log(`\n[Fixture 5 - UPSOKen Sunset] Mode: ${mode.toUpperCase()}`);
+      const targetFmt = mode === 'metadata-only' ? 'png' : 'jpeg';
+      const res = await processImagePipeline(upsokenBuf, {
+        disruptionMode: mode,
+        disruptionStrength: 75,
+        stripMetadata: true,
+        targetFormat: targetFmt,
+      });
+
+      const audit = res.telemetry.provenanceAudit;
+      const { mse, psnr } = await calculatePSNR(upsokenBuf, res.buffer);
+
+      console.log(`  ⏱️ Time: ${res.telemetry.executionTimeMs} ms | 📦 Size: ${(res.buffer.length / 1024).toFixed(1)} KB`);
+      console.log(`  🔍 Byte Audit: C2PA=${audit.c2paFound ? 'FOUND' : 'CLEAN'}, EXIF=${audit.exifFound ? 'FOUND' : 'CLEAN'}, XMP=${audit.xmpFound ? 'FOUND' : 'CLEAN'}, ICC=${audit.iccFound ? 'FOUND' : 'CLEAN'}`);
+      console.log(`  📊 Measured PSNR: ${psnr === Infinity ? 'Infinity (Lossless)' : psnr.toFixed(2) + ' dB'} (MSE: ${mse.toFixed(2)})`);
+
+      if (!audit.clean) {
+        throw new Error(`[ASSERTION FAILED] Fixture 5 in mode '${mode}' did not produce a clean byte container!`);
+      }
+
+      if (mode === 'metadata-only' && psnr !== Infinity) {
+        throw new Error(`[ASSERTION FAILED] Metadata-only mode with PNG export must preserve 100% lossless bit-for-bit pixels on community asset!`);
+      }
+
+      if (mode === 'balanced' && psnr < 31) {
+        throw new Error(`[ASSERTION FAILED] Balanced mode visual drift on community asset exceeded threshold (PSNR: ${psnr.toFixed(2)} dB, expected >= 31 dB)`);
+      }
+
+      if (mode === 'aggressive' && psnr < 27) {
+        throw new Error(`[ASSERTION FAILED] Aggressive mode visual drift on community asset exceeded threshold (PSNR: ${psnr.toFixed(2)} dB, expected >= 27 dB)`);
+      }
+
+      communityResults.push({
+        fixture: 'UPSOKen Sunset (1024x682)',
+        mode,
+        auditClean: audit.clean,
+        psnr: psnr === Infinity ? 'Infinity (Lossless)' : psnr.toFixed(2) + ' dB',
+        mse: mse.toFixed(2),
+        timeMs: res.telemetry.executionTimeMs,
+      });
+    }
+  }
+
   console.log('\n====================================================');
   console.log('✅ ALL PIPELINE, AUDIT, & ALPHA ASSERTIONS PASSED');
   console.log('====================================================');
@@ -233,6 +289,10 @@ async function runVerificationSuite() {
   console.table(syntheticResults);
   console.log('\n--- Fixture 2: Real Photograph Results ---');
   console.table(photoResults);
+  if (communityResults.length > 0) {
+    console.log('\n--- Fixture 5: Community Sunset Asset Results ---');
+    console.table(communityResults);
+  }
 }
 
 runVerificationSuite()

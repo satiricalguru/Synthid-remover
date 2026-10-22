@@ -122,6 +122,96 @@ export function scanBase64Provenance(base64Data: string): ClientProvenanceAudit 
 }
 
 /**
+ * Fast client-side gradient-adaptive range-weighted bilateral filter on ImageData.
+ * Extinguishes low-amplitude steganographic carrier ripples in smooth regions (skies, sunsets, water)
+ * with a precomputed Gaussian LUT, while strictly preserving high-contrast visual edges.
+ */
+function applyBilateralCarrierDisruptionClient(
+  imageData: ImageData,
+  sigmaR: number,
+  noiseScale: number,
+  mode: DisruptionMode
+): { output: ImageData; hasTransparency: boolean } {
+  const { width: w, height: h, data: src } = imageData;
+  const output = new ImageData(w, h);
+  const dst = output.data;
+  dst.set(src);
+
+  const lut = new Float32Array(768);
+  const denom = 2 * sigmaR * sigmaR;
+  for (let d = 0; d < 768; d++) {
+    lut[d] = Math.exp(-(d * d) / denom);
+  }
+
+  const ditherProb = mode === 'aggressive' ? 0.70 : 0.50;
+  let hasTransparency = false;
+
+  for (let y = 1; y < h - 1; y++) {
+    const rowOffset = y * w * 4;
+    for (let x = 1; x < w - 1; x++) {
+      const idx = rowOffset + x * 4;
+      if (src[idx + 3] < 255) {
+        hasTransparency = true;
+      }
+
+      const r = src[idx];
+      const g = src[idx + 1];
+      const b = src[idx + 2];
+
+      let sumR = 0, sumG = 0, sumB = 0, totalW = 0;
+
+      for (let dy = -1; dy <= 1; dy++) {
+        const nRow = (y + dy) * w * 4;
+        for (let dx = -1; dx <= 1; dx++) {
+          const nIdx = nRow + (x + dx) * 4;
+          const nr = src[nIdx];
+          const ng = src[nIdx + 1];
+          const nb = src[nIdx + 2];
+
+          const diff = Math.abs(r - nr) + Math.abs(g - ng) + Math.abs(b - nb);
+          const weight = lut[diff];
+
+          sumR += nr * weight;
+          sumG += ng * weight;
+          sumB += nb * weight;
+          totalW += weight;
+        }
+      }
+
+      const invW = 1.0 / totalW;
+      let outR = sumR * invW;
+      let outG = sumG * invW;
+      let outB = sumB * invW;
+
+      // Multi-band chrominance and luminance phase dither
+      if (Math.random() < ditherProb) {
+        const jChroma = (Math.random() - 0.5) * noiseScale;
+        const jLuma = (Math.random() - 0.5) * (noiseScale * (mode === 'aggressive' ? 0.55 : 0.35));
+        outR = Math.min(255, Math.max(0, outR + jChroma + jLuma));
+        outG = Math.min(255, Math.max(0, outG + jLuma));
+        outB = Math.min(255, Math.max(0, outB - jChroma + jLuma));
+      }
+
+      dst[idx] = Math.round(outR);
+      dst[idx + 1] = Math.round(outG);
+      dst[idx + 2] = Math.round(outB);
+    }
+  }
+
+  // Check border pixels for transparency
+  if (!hasTransparency) {
+    for (let i = 3; i < src.length; i += 64) {
+      if (src[i] < 255) {
+        hasTransparency = true;
+        break;
+      }
+    }
+  }
+
+  return { output, hasTransparency };
+}
+
+/**
  * Fast client-side 3x3 median order-statistic filter on ImageData.
  * Eliminates steganographic outlier noise without blurring sharp image edges.
  */
@@ -222,28 +312,18 @@ export async function processImageClientSide(
   if (options.disruptSignals !== false && !isMetadataOnly) {
     logs.push(`[PROCESS] Initializing ${disruptionMode.toUpperCase()} frequency disruption (Strength: ${disruptionStrength}%)...`);
 
-    // Step 2A: Chrominance-targeted microscopic frequency dither
-    const data = imageData.data;
-    const noiseScale = disruptionMode === 'aggressive' ? (disruptionStrength / 100) * 3.6 : (disruptionStrength / 100) * 2.0;
-    const ditherProb = disruptionMode === 'aggressive' ? 0.75 : 0.55;
-    let hasTransparency = false;
-
-    for (let i = 0; i < data.length; i += 4) {
-      if (data[i + 3] < 255) {
-        hasTransparency = true;
-      }
-
-      if (Math.random() < ditherProb) {
-        const jitter = (Math.random() - 0.5) * noiseScale;
-        data[i] = Math.min(255, Math.max(0, Math.round(data[i] + jitter)));
-        data[i + 2] = Math.min(255, Math.max(0, Math.round(data[i + 2] - jitter)));
-
-        if (disruptionMode === 'aggressive') {
-          const lumaJitter = (Math.random() - 0.5) * (noiseScale * 0.35);
-          data[i + 1] = Math.min(255, Math.max(0, Math.round(data[i + 1] + lumaJitter)));
-        }
-      }
-    }
+    // Step 2A: Gradient-Adaptive Bilateral Carrier Disruption & Multi-Band Phase Decorrelation
+    // Suppresses low-amplitude carrier ripples in continuous-tone regions (skies, sunsets, water)
+    const sigmaR = disruptionMode === 'aggressive' ? 20 : 14;
+    const noiseScale = disruptionMode === 'aggressive' ? (disruptionStrength / 100) * 2.8 : (disruptionStrength / 100) * 1.8;
+    const { output: bilateralData, hasTransparency } = applyBilateralCarrierDisruptionClient(
+      imageData,
+      sigmaR,
+      noiseScale,
+      disruptionMode
+    );
+    imageData = bilateralData;
+    logs.push(`[PROCESS] Gradient-adaptive bilateral carrier smoothing applied (flat-field carrier suppressed).`);
 
     // Step 2B: Non-linear order-statistic filtering (Aggressive mode)
     // Strips steganographic outlier noise without destroying coherent visual edges
@@ -255,8 +335,8 @@ export async function processImageClientSide(
 
     // Step 2C: Anisotropic non-uniform geometric coordinate desynchronization
     // Breaks orthogonal 8x8 DCT grid and rectangular convolutional receptive fields
-    const scaleX = disruptionMode === 'aggressive' ? 0.975 : 0.988;
-    const scaleY = disruptionMode === 'aggressive' ? 0.965 : 0.978;
+    const scaleX = disruptionMode === 'aggressive' ? 0.972 : 0.986;
+    const scaleY = disruptionMode === 'aggressive' ? 0.962 : 0.976;
     const scaledW = Math.max(16, Math.round(canvas.width * scaleX));
     const scaledH = Math.max(16, Math.round(canvas.height * scaleY));
 
@@ -280,7 +360,7 @@ export async function processImageClientSide(
     // Runs an intermediate lossy cycle on canvas to quantize high-frequency DCT harmonics
     // before final export. If transparency is present, we use lossy WebP to avoid flattening
     // alpha onto black (#000000). For opaque images, we use lossy JPEG.
-    const internalQuality = disruptionMode === 'aggressive' ? 0.78 : 0.84;
+    const internalQuality = disruptionMode === 'aggressive' ? 0.76 : 0.82;
     const lossyMime = hasTransparency ? 'image/webp' : 'image/jpeg';
     const internalLossyDataUrl = canvas.toDataURL(lossyMime, internalQuality);
 
