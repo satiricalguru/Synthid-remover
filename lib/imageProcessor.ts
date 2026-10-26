@@ -255,241 +255,82 @@ function applyBilateralCarrierDisruption(
 }
 
 /**
- * 1D in-place radix-2 Cooley-Tukey Fast Fourier Transform.
+ * Sub-pixel sinusoidal coordinate micro-warp.
+ * Introduces continuous sub-pixel phase drift across the coordinate grid
+ * (0.6px amplitude, 160px wavelength) to desynchronize CNN receptive fields
+ * without introducing visible distortion or blurring.
  */
-function fft1d(re: Float64Array, im: Float64Array, n: number, inv: boolean = false): void {
-  for (let i = 1, j = 0; i < n; i++) {
-    let bit = n >> 1;
-    for (; j & bit; bit >>= 1) j ^= bit;
-    j ^= bit;
-    if (i < j) {
-      const tr = re[i]; re[i] = re[j]; re[j] = tr;
-      const ti = im[i]; im[i] = im[j]; im[j] = ti;
-    }
-  }
-  for (let len = 2; len <= n; len <<= 1) {
-    const ang = (inv ? 2 : -2) * Math.PI / len;
-    const wlen_r = Math.cos(ang), wlen_i = Math.sin(ang);
-    for (let i = 0; i < n; i += len) {
-      let wr = 1, wi = 0;
-      const halfLen = len >> 1;
-      for (let j = 0; j < halfLen; j++) {
-        const u_r = re[i + j], u_i = im[i + j];
-        const v_r = re[i + j + halfLen] * wr - im[i + j + halfLen] * wi;
-        const v_i = re[i + j + halfLen] * wi + im[i + j + halfLen] * wr;
-        re[i + j] = u_r + v_r;
-        im[i + j] = u_i + v_i;
-        re[i + j + halfLen] = u_r - v_r;
-        im[i + j + halfLen] = u_i - v_i;
-        const n_wr = wr * wlen_r - wi * wlen_i;
-        wi = wr * wlen_i + wi * wlen_r;
-        wr = n_wr;
-      }
-    }
-  }
-  if (inv) {
-    const invN = 1 / n;
-    for (let i = 0; i < n; i++) {
-      re[i] *= invN;
-      im[i] *= invN;
-    }
-  }
-}
-
-/**
- * 2D Fast Fourier Transform on an N x N power-of-two matrix.
- */
-function fft2d(re: Float64Array, im: Float64Array, N: number, inv: boolean = false): void {
-  for (let y = 0; y < N; y++) {
-    const rowOffset = y * N;
-    const r_r = re.subarray(rowOffset, rowOffset + N);
-    const r_i = im.subarray(rowOffset, rowOffset + N);
-    fft1d(r_r, r_i, N, inv);
-  }
-  const col_r = new Float64Array(N);
-  const col_i = new Float64Array(N);
-  for (let x = 0; x < N; x++) {
-    for (let y = 0; y < N; y++) {
-      col_r[y] = re[y * N + x];
-      col_i[y] = im[y * N + x];
-    }
-    fft1d(col_r, col_i, N, inv);
-    for (let y = 0; y < N; y++) {
-      re[y * N + x] = col_r[y];
-      im[y * N + x] = col_i[y];
-    }
-  }
-}
-
-/**
- * Quality-Preserving 16-32 Pixel Octave Fourier Phase Perturbation on Luminance (Y).
- *
- * Ground-truth research findings (wiltodelta/remove-ai-watermarks against OpenAI official verifier):
- * DeepMind SynthID embeds carrier energy primarily in the Luminance (Y) channel within the
- * 16-32 pixel period octave (spatial frequency radius k in [N/32, N/16]).
- *
- * Instead of 100% phase randomization (which creates visible artifacts), this uses:
- * 1. **Circular Zero-Mean Phase Jitter:** Jitters phase angles by a controlled bounded offset
- *    (±58° at band center) without branch-cut wrapping errors, decorrelating the detector without noise mottling.
- * 2. **Gaussian Soft Rolloff:** Applies a smooth Gaussian transition at band edges instead of a
- *    hard spectral cutoff, preventing Gibbs ringing artifacts.
- * 3. **Edge-Adaptive Delta Blending:** Computes local Sobel gradient magnitude per pixel and
- *    attenuates the luma delta in high-texture/edge regions (where humans notice distortion)
- *    while applying full disruption to smooth/flat regions (where watermarks hide).
- *
- * Result: SynthID verifier flips to 'not_detected' at ~30-35 dB PSNR (visually imperceptible).
- */
-export function applyFourierOctaveScramble(
+function applyMicroWarp(
   pixels: Uint8ClampedArray,
   w: number,
   h: number,
-  channels: number = 4
+  channels: number = 4,
+  amp: number = 0.6,
+  waveLen: number = 160
 ): Uint8ClampedArray {
-  let N = 2;
-  while (N < Math.max(w, h)) N <<= 1;
-
-  const re = new Float64Array(N * N);
-  const im = new Float64Array(N * N);
-  const Y_orig = new Float64Array(w * h);
-
-  // Reflection-padded Luminance (Y) initialization prevents boundary Gibbs artifacts
-  for (let y = 0; y < N; y++) {
-    const srcY = y < h ? y : (h - 1) - ((y - h) % h);
-    for (let x = 0; x < N; x++) {
-      const srcX = x < w ? x : (w - 1) - ((x - w) % w);
-      const pIdx = (srcY * w + srcX) * channels;
-      const yVal = 0.299 * pixels[pIdx] + 0.587 * pixels[pIdx + 1] + 0.114 * pixels[pIdx + 2];
-      if (y < h && x < w) {
-        Y_orig[y * w + x] = yVal;
-      }
-      re[y * N + x] = yVal;
-    }
-  }
-
-  // Forward 2D FFT
-  fft2d(re, im, N, false);
-
-  // Frequency band corresponding to spatial wavelength 16..32 pixels: k = N / period
-  const minK = N / 32;
-  const maxK = N / 16;
-  // Gaussian rolloff sigma (in frequency units) — creates smooth transition at band edges
-  const rolloffSigma = (maxK - minK) * 0.25;
-  // Maximum circular phase jitter (in fractions of PI) at band center (~58 degrees max deviation)
-  const maxJitter = 0.32;
-
-  for (let ky = 0; ky <= N / 2; ky++) {
-    const kv = ky <= N / 2 ? ky : ky - N;
-    const kxMax = (ky === 0 || ky === N / 2) ? N / 2 : N;
-    for (let kx = 0; kx < kxMax; kx++) {
-      const ku = kx <= N / 2 ? kx : kx - N;
-      const k = Math.sqrt(ku * ku + kv * kv);
-
-      // Gaussian soft rolloff: full strength in band center, smooth falloff at edges
-      let bandWeight = 0;
-      if (k >= minK && k <= maxK) {
-        // Distance from band center
-        const bandCenter = (minK + maxK) / 2;
-        const distFromCenter = Math.abs(k - bandCenter);
-        const halfWidth = (maxK - minK) / 2;
-        if (distFromCenter <= halfWidth * 0.6) {
-          bandWeight = 1.0; // Full strength in core band
-        } else {
-          // Gaussian rolloff at edges
-          const edgeDist = distFromCenter - halfWidth * 0.6;
-          bandWeight = Math.exp(-(edgeDist * edgeDist) / (2 * rolloffSigma * rolloffSigma));
-        }
-      }
-
-      if (bandWeight > 0.01) {
-        const idx = ky * N + kx;
-        const mag = Math.sqrt(re[idx] * re[idx] + im[idx] * im[idx]);
-        const origPhase = Math.atan2(im[idx], re[idx]);
-
-        // Circular zero-mean phase jitter prevents branch-cut phase flips and mottled artifacts
-        const dPhase = (Math.random() * 2 - 1) * Math.PI * maxJitter * bandWeight;
-        const newPhase = origPhase + dPhase;
-
-        const newRe = mag * Math.cos(newPhase);
-        const newIm = mag * Math.sin(newPhase);
-
-        re[idx] = newRe;
-        im[idx] = newIm;
-
-        // Hermitian conjugate symmetry: F(-u, -v) = F*(u, v) ensures real-valued spatial result
-        const conjX = (N - kx) % N;
-        const conjY = (N - ky) % N;
-        const conjIdx = conjY * N + conjX;
-
-        re[conjIdx] = newRe;
-        im[conjIdx] = -newIm;
-      }
-    }
-  }
-
-  // Inverse 2D FFT
-  fft2d(re, im, N, true);
-
-  // Compute edge-adaptive blending map using Sobel gradient magnitude on original Y
-  // High gradient = high texture/edges = reduce delta; Low gradient = smooth = full delta
-  const gradientMap = new Float64Array(w * h);
-  for (let y = 1; y < h - 1; y++) {
-    for (let x = 1; x < w - 1; x++) {
-      const yIdx = y * w + x;
-      // Sobel gradient magnitude (simplified 3x3)
-      const gx = -Y_orig[yIdx - w - 1] + Y_orig[yIdx - w + 1]
-               - 2 * Y_orig[yIdx - 1] + 2 * Y_orig[yIdx + 1]
-               - Y_orig[yIdx + w - 1] + Y_orig[yIdx + w + 1];
-      const gy = -Y_orig[yIdx - w - 1] - 2 * Y_orig[yIdx - w] - Y_orig[yIdx - w + 1]
-               + Y_orig[yIdx + w - 1] + 2 * Y_orig[yIdx + w] + Y_orig[yIdx + w + 1];
-      gradientMap[yIdx] = Math.sqrt(gx * gx + gy * gy);
-    }
-  }
-
-  // Normalize gradient map to [0, 1] and compute edge-aware blend factors
-  let maxGrad = 0;
-  for (let i = 0; i < gradientMap.length; i++) {
-    if (gradientMap[i] > maxGrad) maxGrad = gradientMap[i];
-  }
-  const gradNorm = maxGrad > 0 ? 1.0 / maxGrad : 1.0;
-
   const output = new Uint8ClampedArray(pixels.length);
-  output.set(pixels);
+  const k = (2 * Math.PI) / waveLen;
 
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
-      const pIdx = (y * w + x) * channels;
-      const yIdx = y * w + x;
-      const rawDelta = re[y * N + x] - Y_orig[yIdx];
+      const dx = amp * Math.sin(y * k);
+      const dy = amp * Math.cos(x * k);
 
-      // Edge-adaptive blending: smooth regions get full delta, edges get reduced delta
-      // edgeFactor: 0 = smooth (full disruption), 1 = strong edge (minimal disruption)
-      const edgeFactor = Math.min(1.0, gradientMap[yIdx] * gradNorm * 2.0);
-      // Blend: keep 85% disruption even at edges (watermarks are everywhere), but soften by 60% at edges
-      const blendFactor = 1.0 - edgeFactor * 0.6;
-      const deltaY = rawDelta * blendFactor;
+      const srcX = Math.max(0, Math.min(w - 1, x + dx));
+      const srcY = Math.max(0, Math.min(h - 1, y + dy));
 
-      output[pIdx] = Math.min(255, Math.max(0, Math.round(pixels[pIdx] + deltaY)));
-      output[pIdx + 1] = Math.min(255, Math.max(0, Math.round(pixels[pIdx + 1] + deltaY)));
-      output[pIdx + 2] = Math.min(255, Math.max(0, Math.round(pixels[pIdx + 2] + deltaY)));
-      // alpha channel preserved
+      const x0 = Math.floor(srcX);
+      const x1 = Math.min(w - 1, x0 + 1);
+      const y0 = Math.floor(srcY);
+      const y1 = Math.min(h - 1, y0 + 1);
+
+      const wx = srcX - x0;
+      const wy = srcY - y0;
+
+      const idx = (y * w + x) * channels;
+      for (let c = 0; c < 3; c++) {
+        const v00 = pixels[(y0 * w + x0) * channels + c];
+        const v10 = pixels[(y0 * w + x1) * channels + c];
+        const v01 = pixels[(y1 * w + x0) * channels + c];
+        const v11 = pixels[(y1 * w + x1) * channels + c];
+
+        const top = v00 * (1 - wx) + v10 * wx;
+        const bot = v01 * (1 - wx) + v11 * wx;
+        output[idx + c] = Math.round(top * (1 - wy) + bot * wy);
+      }
+      if (channels === 4) {
+        output[idx + 3] = pixels[idx + 3];
+      }
     }
   }
-
   return output;
+}
+
+/**
+ * Backward compatibility stub for Fourier scrambler.
+ */
+export function applyFourierOctaveScramble(
+  pixels: Uint8ClampedArray,
+  _w: number,
+  _h: number,
+  _channels: number = 4
+): Uint8ClampedArray {
+  return pixels;
 }
 
 /**
  * Disrupts imperceptible embedded frequency-domain watermarks (such as Google SynthID
  * and OpenAI / DALL-E watermarks) across spatial, frequency, chroma, and geometric domains.
  *
- * Implements research-backed stages:
- * 1. 16-32 px Cartesian Fourier phase scramble on Luminance (Y) in aggressive mode (wiltodelta).
- * 2. Gradient-adaptive range bilateral smoothing (clearing carrier ripples in flat areas).
- * 3. Multi-band chrominance and luminance phase decorrelation.
- * 4. Non-uniform anisotropic spatial squeeze/stretch (breaking rectangular CNN receptive fields).
- * 5. Non-linear median order-statistic spatial filtering (in aggressive mode).
- * 6. Mandatory internal lossy JPEG round-trip (quantizing high-frequency DCT matrix harmonics).
- * 7. Structural detail restoration with zero carrier revival (m1: 0.0).
+ * Implements research-backed multi-layer evasion without leopard-spot artifacts:
+ * 1. Sub-pixel sinusoidal coordinate micro-warp (desynchronizing CNN spatial phase).
+ * 2. Range-weighted bilateral carrier smoothing (extinguishing carrier ripples in flat regions).
+ * 3. Non-uniform anisotropic coordinate squeeze (breaking rectangular kernel alignment).
+ * 4. Non-linear median order-statistic spatial filtering (eliminating steganographic outliers).
+ * 5. Mandatory internal lossy JPEG round-trip (quantizing high-frequency DCT harmonics & chroma).
+ * 6. Dual-Sigma Edge-Aware Frequency Recombination (DeSynth-grade detail preservation):
+ *    - Full high-frequency structural edges restored at sigma=1.2 in textured regions.
+ *    - Flat areas (skies, sunsets, skin) use clean base with sigma=2.1, eliminating carrier ripples.
  */
 export async function disruptEmbeddedSignals(
   inputBuffer: Buffer,
@@ -508,7 +349,7 @@ export async function disruptEmbeddedSignals(
   const width = metadata.width || 800;
   const height = metadata.height || 600;
 
-  // Step 1: Extract pure raw pixel data to isolate signal from container
+  // Step 1: Extract pure raw RGBA pixel data to isolate signal from container
   const { data: rawPixels, info } = await image
     .ensureAlpha()
     .raw()
@@ -517,19 +358,40 @@ export async function disruptEmbeddedSignals(
   const pixelArray = new Uint8ClampedArray(rawPixels.buffer, rawPixels.byteOffset, rawPixels.byteLength);
   const totalChannels = info.channels; // 4 (RGBA)
 
-  // Step 2: Quality-Preserving 16-32 px Fourier Phase Perturbation (Aggressive Mode)
-  // DeepMind's SynthID embeds carrier energy primarily in Luminance within the 16-32 px
-  // octave band. Partial phase perturbation (0.45 blend ratio) with edge-adaptive delta blending
-  // decorrelates the matched filter detector while preserving visual quality (~30-35 dB PSNR).
-  let currentPixels = pixelArray;
-  if (mode === 'aggressive') {
-    currentPixels = applyFourierOctaveScramble(currentPixels, width, height, totalChannels);
+  // Step 2: Compute normalized Sobel edge magnitude map on original Luminance
+  const gray = new Float32Array(width * height);
+  for (let i = 0, j = 0; i < pixelArray.length; i += 4, j++) {
+    gray[j] = 0.299 * pixelArray[i] + 0.587 * pixelArray[i + 1] + 0.114 * pixelArray[i + 2];
   }
 
-  // Step 3: Gradient-Adaptive Bilateral Carrier Disruption & Multi-Band Phase Decorrelation
-  // In continuous-tone areas (skies, sunsets, flat backgrounds, water), bilateral smoothing
-  // extinguishes carrier ripples in smooth regions while preserving high-contrast structural edges.
-  const sigmaR = mode === 'aggressive' ? 16 : 14;
+  const edgeMask = new Float32Array(width * height);
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      const idx = y * width + x;
+      const gx = -gray[idx - width - 1] + gray[idx - width + 1]
+               - 2 * gray[idx - 1] + 2 * gray[idx + 1]
+               - gray[idx + width - 1] + gray[idx + width + 1];
+      const gy = -gray[idx - width - 1] - 2 * gray[idx - width] - gray[idx - width + 1]
+               + gray[idx + width - 1] + 2 * gray[idx + width] + gray[idx + width + 1];
+      edgeMask[idx] = Math.sqrt(gx * gx + gy * gy);
+    }
+  }
+
+  const sortedEdges = Float32Array.from(edgeMask).sort();
+  const p99 = sortedEdges[Math.floor(sortedEdges.length * 0.99)] || 1.0;
+  for (let i = 0; i < edgeMask.length; i++) {
+    edgeMask[i] = Math.min(1.0, edgeMask[i] / p99);
+  }
+
+  // Step 3: Sub-pixel Micro-Warping (Aggressive Mode)
+  let currentPixels = pixelArray;
+  if (mode === 'aggressive') {
+    const warpAmp = (strength / 100) * 0.6;
+    currentPixels = applyMicroWarp(currentPixels, width, height, totalChannels, warpAmp, 160);
+  }
+
+  // Step 4: Gradient-Adaptive Bilateral Carrier Disruption
+  const sigmaR = mode === 'aggressive' ? 18 : 14;
   const noiseScale = mode === 'aggressive' ? (strength / 100) * 1.8 : (strength / 100) * 1.4;
   const { output: disruptedPixels, hasTransparency } = applyBilateralCarrierDisruption(
     currentPixels,
@@ -541,54 +403,28 @@ export async function disruptEmbeddedSignals(
     mode
   );
 
-  // Step 3: Reconstruct uncompressed buffer from disrupted pixel array
-  let currentBuffer = await sharp(Buffer.from(disruptedPixels.buffer, disruptedPixels.byteOffset, disruptedPixels.byteLength), {
+  // Step 5: Anisotropic Resampling & Median Filtering (Clean Base Construction)
+  const squeezeX = mode === 'aggressive' ? 0.954 : 0.984;
+  const squeezeY = mode === 'aggressive' ? 0.942 : 0.976;
+  const squeezeW = Math.max(16, Math.round(width * squeezeX));
+  const squeezeH = Math.max(16, Math.round(height * squeezeY));
+
+  let cleanBase = sharp(Buffer.from(disruptedPixels.buffer, disruptedPixels.byteOffset, disruptedPixels.byteLength), {
     raw: {
       width: info.width,
       height: info.height,
       channels: info.channels,
     },
   })
-    .png()
-    .toBuffer();
+    .resize(squeezeW, squeezeH, { kernel: sharp.kernel.cubic, fit: 'fill' })
+    .median(3)
+    .resize(width, height, { kernel: sharp.kernel.cubic, fit: 'fill' });
 
-  // Step 4: Non-linear Spatial Filtering & Anisotropic Resampling
-  // Neural network detectors (like SynthID CNNs) rely on rigid coordinate grids, fixed receptive fields,
-  // and subtle harmonic micro-correlations.
-  // 1. In aggressive mode, median filtering (3x3) eliminates isolated steganographic outlier noise.
-  // 2. Anisotropic scaling (different X vs Y ratios) desynchronizes convolutional kernels.
-  // 3. Resampling with cubic (not Lanczos sinc) prevents mathematical re-interpolation of the carrier wave.
-  if (mode === 'aggressive') {
-    // Aggressive: gentler squeeze + cubic resample (Fourier perturbation does the heavy lifting)
-    const squeezeW = Math.max(16, Math.round(width * 0.986));
-    const squeezeH = Math.max(16, Math.round(height * 0.976));
-
-    currentBuffer = await sharp(currentBuffer)
-      .resize(squeezeW, squeezeH, { kernel: sharp.kernel.cubic, fit: 'fill' })
-      .resize(width, height, { kernel: sharp.kernel.cubic, fit: 'fill' })
-      .png()
-      .toBuffer();
-  } else {
-    // Balanced: 2-stage anisotropic phase disruption with cubic interpolation
-    const squeezeW = Math.max(16, Math.round(width * 0.986));
-    const squeezeH = Math.max(16, Math.round(height * 0.976));
-
-    currentBuffer = await sharp(currentBuffer)
-      .resize(squeezeW, squeezeH, { kernel: sharp.kernel.cubic, fit: 'fill' })
-      .resize(width, height, { kernel: sharp.kernel.cubic, fit: 'fill' })
-      .png()
-      .toBuffer();
-  }
-
-  // Step 5: Mandatory Internal Lossy Round-Trip (DCT Coefficient Quantization)
-  // Steganographic watermarks hide in subtle high-frequency DCT harmonic relationships.
-  // Cycling through a lossy pass quantizes and zeroes out low-amplitude high-frequency DCT bins.
-  // If the image contains transparency (alpha < 255), JPEG would flatten it onto black (#000000).
-  // In that case, we use lossy WebP with alpha preservation; otherwise, we use Mozjpeg trellis quantization.
-  let intermediateLossy: Buffer;
+  // Internal lossy quantization round-trip
+  let cleanBaseBuffer: Buffer;
   if (!hasTransparency) {
-    const internalJpegQuality = mode === 'aggressive' ? 82 : 86;
-    intermediateLossy = await sharp(currentBuffer)
+    const internalJpegQuality = mode === 'aggressive' ? 74 : 84;
+    cleanBaseBuffer = await cleanBase
       .jpeg({
         quality: internalJpegQuality,
         mozjpeg: true,
@@ -598,8 +434,8 @@ export async function disruptEmbeddedSignals(
       })
       .toBuffer();
   } else {
-    const internalWebpQuality = mode === 'aggressive' ? 80 : 86;
-    intermediateLossy = await sharp(currentBuffer)
+    const internalWebpQuality = mode === 'aggressive' ? 76 : 84;
+    cleanBaseBuffer = await cleanBase
       .webp({
         quality: internalWebpQuality,
         effort: 4,
@@ -608,13 +444,50 @@ export async function disruptEmbeddedSignals(
       .toBuffer();
   }
 
-  // Step 6: Detail Preservation (Zero Carrier Re-amplification)
-  // Re-accentuates high-contrast structural edges while keeping m1: 0 (flat slope 0)
-  // so steganographic low-amplitude noise in smooth/flat regions is NOT re-amplified.
-  let finalPipeline = sharp(intermediateLossy).sharpen({
-    sigma: mode === 'aggressive' ? 0.6 : 0.5,
-    m1: 0.0, // Critical: 0 slope for flat areas prevents reviving carrier patterns
-    m2: mode === 'aggressive' ? 1.1 : 1.0,
+  // Step 6: Dual-Sigma Edge-Aware Frequency Recombination
+  // Smoothly restores high-frequency textures and edges from original image
+  // while keeping low-to-mid carrier waves completely extinguished in smooth/flat regions.
+  const sigmaSafe = mode === 'aggressive' ? 2.1 : 1.6;
+  const sigmaEdge = mode === 'aggressive' ? 1.2 : 0.8;
+  const flatHighScale = mode === 'aggressive' ? 0.40 : 0.80;
+
+  const [cleanLowSafeRaw, cleanLowEdgeRaw, origLowSafeRaw, origLowEdgeRaw] = await Promise.all([
+    sharp(cleanBaseBuffer).blur(sigmaSafe).ensureAlpha().raw().toBuffer(),
+    sharp(cleanBaseBuffer).blur(sigmaEdge).ensureAlpha().raw().toBuffer(),
+    sharp(inputBuffer).blur(sigmaSafe).ensureAlpha().raw().toBuffer(),
+    sharp(inputBuffer).blur(sigmaEdge).ensureAlpha().raw().toBuffer(),
+  ]);
+
+  const recombined = new Uint8ClampedArray(width * height * 4);
+  const totalPixels = width * height;
+
+  for (let p = 0; p < totalPixels; p++) {
+    const m = edgeMask[p]; // 0 = flat, 1 = sharp edge
+    const idx = p * 4;
+
+    for (let c = 0; c < 3; c++) {
+      // Edge path: high frequency from sigmaEdge
+      const highEdge = pixelArray[idx + c] - origLowEdgeRaw[idx + c];
+      const valEdge = cleanLowEdgeRaw[idx + c] + highEdge;
+
+      // Safe path: high frequency from sigmaSafe with attenuation in flat areas
+      const highSafe = pixelArray[idx + c] - origLowSafeRaw[idx + c];
+      const valSafe = cleanLowSafeRaw[idx + c] + highSafe * flatHighScale;
+
+      // Alpha-blended by normalized gradient magnitude
+      const blended = m * valEdge + (1.0 - m) * valSafe;
+      recombined[idx + c] = Math.min(255, Math.max(0, Math.round(blended)));
+    }
+    // Alpha channel preserved from original
+    recombined[idx + 3] = pixelArray[idx + 3];
+  }
+
+  let finalPipeline = sharp(Buffer.from(recombined.buffer), {
+    raw: {
+      width,
+      height,
+      channels: 4,
+    },
   });
 
   // Step 7: Final clean export in requested format with NO metadata headers
