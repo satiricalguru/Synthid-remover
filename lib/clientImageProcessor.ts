@@ -279,10 +279,12 @@ function fft2dClient(re: Float64Array, im: Float64Array, N: number, inv: boolean
 }
 
 /**
- * 16-32 Pixel Octave Cartesian Fourier Phase Scramble on Luminance (Y) (Client).
+ * Quality-Preserving 16-32 Pixel Octave Fourier Phase Perturbation on Luminance (Y) (Client).
  *
- * Scrambles phase in the 16-32 px wavelength band while strictly preserving
- * Fourier magnitude and Hermitian symmetry, decorrelating official SynthID detectors.
+ * Instead of 100% phase randomization (which creates visible artifacts), this uses:
+ * 1. Circular zero-mean phase jitter (±58° at band center) without branch-cut wrapping errors.
+ * 2. Gaussian soft rolloff at band edges — prevents spectral ringing.
+ * 3. Edge-adaptive delta blending — protects high-texture regions, disrupts smooth areas.
  */
 function applyFourierOctaveScrambleClient(imageData: ImageData): ImageData {
   const { width: w, height: h, data: src } = imageData;
@@ -315,6 +317,8 @@ function applyFourierOctaveScrambleClient(imageData: ImageData): ImageData {
 
   const minK = N / 32;
   const maxK = N / 16;
+  const rolloffSigma = (maxK - minK) * 0.25;
+  const maxJitter = 0.32;
 
   for (let ky = 0; ky <= N / 2; ky++) {
     const kv = ky <= N / 2 ? ky : ky - N;
@@ -323,10 +327,28 @@ function applyFourierOctaveScrambleClient(imageData: ImageData): ImageData {
       const ku = kx <= N / 2 ? kx : kx - N;
       const k = Math.sqrt(ku * ku + kv * kv);
 
+      // Gaussian soft rolloff: full strength in band center, smooth falloff at edges
+      let bandWeight = 0;
       if (k >= minK && k <= maxK) {
+        const bandCenter = (minK + maxK) / 2;
+        const distFromCenter = Math.abs(k - bandCenter);
+        const halfWidth = (maxK - minK) / 2;
+        if (distFromCenter <= halfWidth * 0.6) {
+          bandWeight = 1.0;
+        } else {
+          const edgeDist = distFromCenter - halfWidth * 0.6;
+          bandWeight = Math.exp(-(edgeDist * edgeDist) / (2 * rolloffSigma * rolloffSigma));
+        }
+      }
+
+      if (bandWeight > 0.01) {
         const idx = ky * N + kx;
         const mag = Math.sqrt(re[idx] * re[idx] + im[idx] * im[idx]);
-        const newPhase = (Math.random() * 2 - 1) * Math.PI;
+        const origPhase = Math.atan2(im[idx], re[idx]);
+
+        // Circular zero-mean phase jitter prevents branch-cut phase flips and mottled artifacts
+        const dPhase = (Math.random() * 2 - 1) * Math.PI * maxJitter * bandWeight;
+        const newPhase = origPhase + dPhase;
 
         const newRe = mag * Math.cos(newPhase);
         const newIm = mag * Math.sin(newPhase);
@@ -347,11 +369,36 @@ function applyFourierOctaveScrambleClient(imageData: ImageData): ImageData {
 
   fft2dClient(re, im, N, true);
 
+  // Compute edge-adaptive blending map using Sobel gradient magnitude on original Y
+  const gradientMap = new Float64Array(w * h);
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const yIdx = y * w + x;
+      const gx = -Y_orig[yIdx - w - 1] + Y_orig[yIdx - w + 1]
+               - 2 * Y_orig[yIdx - 1] + 2 * Y_orig[yIdx + 1]
+               - Y_orig[yIdx + w - 1] + Y_orig[yIdx + w + 1];
+      const gy = -Y_orig[yIdx - w - 1] - 2 * Y_orig[yIdx - w] - Y_orig[yIdx - w + 1]
+               + Y_orig[yIdx + w - 1] + 2 * Y_orig[yIdx + w] + Y_orig[yIdx + w + 1];
+      gradientMap[yIdx] = Math.sqrt(gx * gx + gy * gy);
+    }
+  }
+
+  let maxGrad = 0;
+  for (let i = 0; i < gradientMap.length; i++) {
+    if (gradientMap[i] > maxGrad) maxGrad = gradientMap[i];
+  }
+  const gradNorm = maxGrad > 0 ? 1.0 / maxGrad : 1.0;
+
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const pIdx = (y * w + x) * 4;
       const yIdx = y * w + x;
-      const deltaY = re[y * N + x] - Y_orig[yIdx];
+      const rawDelta = re[y * N + x] - Y_orig[yIdx];
+
+      // Edge-adaptive blending: smooth regions get full delta, edges get reduced delta
+      const edgeFactor = Math.min(1.0, gradientMap[yIdx] * gradNorm * 2.0);
+      const blendFactor = 1.0 - edgeFactor * 0.6;
+      const deltaY = rawDelta * blendFactor;
 
       dst[pIdx] = Math.min(255, Math.max(0, Math.round(src[pIdx] + deltaY)));
       dst[pIdx + 1] = Math.min(255, Math.max(0, Math.round(src[pIdx + 1] + deltaY)));
@@ -474,8 +521,8 @@ export async function processImageClientSide(
 
     // Step 2B: Gradient-Adaptive Bilateral Carrier Disruption & Multi-Band Phase Decorrelation
     // Suppresses low-amplitude carrier ripples in continuous-tone regions (skies, sunsets, water)
-    const sigmaR = disruptionMode === 'aggressive' ? 20 : 14;
-    const noiseScale = disruptionMode === 'aggressive' ? (disruptionStrength / 100) * 2.8 : (disruptionStrength / 100) * 1.8;
+    const sigmaR = disruptionMode === 'aggressive' ? 16 : 14;
+    const noiseScale = disruptionMode === 'aggressive' ? (disruptionStrength / 100) * 1.8 : (disruptionStrength / 100) * 1.4;
     const { output: bilateralData, hasTransparency } = applyBilateralCarrierDisruptionClient(
       imageData,
       sigmaR,
@@ -484,19 +531,12 @@ export async function processImageClientSide(
     );
     imageData = bilateralData;
     logs.push(`[PROCESS] Gradient-adaptive bilateral carrier smoothing applied (flat-field carrier suppressed).`);
-
-    // Step 2B: Non-linear order-statistic filtering (Aggressive mode)
-    // Strips steganographic outlier noise without destroying coherent visual edges
-    if (disruptionMode === 'aggressive') {
-      imageData = applyMedianFilter3x3(imageData);
-      logs.push(`[PROCESS] 3x3 median order-statistic spatial filter applied.`);
-    }
     ctx.putImageData(imageData, 0, 0);
 
     // Step 2C: Anisotropic non-uniform geometric coordinate desynchronization
     // Breaks orthogonal 8x8 DCT grid and rectangular convolutional receptive fields
-    const scaleX = disruptionMode === 'aggressive' ? 0.972 : 0.986;
-    const scaleY = disruptionMode === 'aggressive' ? 0.962 : 0.976;
+    const scaleX = disruptionMode === 'aggressive' ? 0.986 : 0.990;
+    const scaleY = disruptionMode === 'aggressive' ? 0.976 : 0.982;
     const scaledW = Math.max(16, Math.round(canvas.width * scaleX));
     const scaledH = Math.max(16, Math.round(canvas.height * scaleY));
 
@@ -520,7 +560,7 @@ export async function processImageClientSide(
     // Runs an intermediate lossy cycle on canvas to quantize high-frequency DCT harmonics
     // before final export. If transparency is present, we use lossy WebP to avoid flattening
     // alpha onto black (#000000). For opaque images, we use lossy JPEG.
-    const internalQuality = disruptionMode === 'aggressive' ? 0.76 : 0.82;
+    const internalQuality = disruptionMode === 'aggressive' ? 0.82 : 0.88;
     const lossyMime = hasTransparency ? 'image/webp' : 'image/jpeg';
     const internalLossyDataUrl = canvas.toDataURL(lossyMime, internalQuality);
 

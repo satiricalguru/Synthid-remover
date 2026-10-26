@@ -111,8 +111,8 @@ async function runVerificationSuite() {
       throw new Error(`[ASSERTION FAILED] Balanced mode visual drift exceeded threshold (PSNR: ${psnr.toFixed(2)} dB, expected >= 38 dB)`);
     }
 
-    if (mode === 'aggressive' && psnr < 20) {
-      throw new Error(`[ASSERTION FAILED] Aggressive mode visual drift exceeded threshold (PSNR: ${psnr.toFixed(2)} dB, expected >= 20 dB)`);
+    if (mode === 'aggressive' && psnr < 30) {
+      throw new Error(`[ASSERTION FAILED] Aggressive mode visual drift exceeded threshold (PSNR: ${psnr.toFixed(2)} dB, expected >= 30 dB)`);
     }
 
     syntheticResults.push({
@@ -165,8 +165,8 @@ async function runVerificationSuite() {
       throw new Error(`[ASSERTION FAILED] Balanced mode visual drift on photo exceeded threshold (PSNR: ${psnr.toFixed(2)} dB, expected >= 35 dB)`);
     }
 
-    if (mode === 'aggressive' && psnr < 19) {
-      throw new Error(`[ASSERTION FAILED] Aggressive mode visual drift on photo exceeded threshold (PSNR: ${psnr.toFixed(2)} dB, expected >= 19 dB)`);
+    if (mode === 'aggressive' && psnr < 25) {
+      throw new Error(`[ASSERTION FAILED] Aggressive mode visual drift on photo exceeded threshold (PSNR: ${psnr.toFixed(2)} dB, expected >= 25 dB)`);
     }
 
     photoResults.push({
@@ -267,8 +267,8 @@ async function runVerificationSuite() {
         throw new Error(`[ASSERTION FAILED] Balanced mode visual drift on community asset exceeded threshold (PSNR: ${psnr.toFixed(2)} dB, expected >= 31 dB)`);
       }
 
-      if (mode === 'aggressive' && psnr < 19) {
-        throw new Error(`[ASSERTION FAILED] Aggressive mode visual drift on community asset exceeded threshold (PSNR: ${psnr.toFixed(2)} dB, expected >= 19 dB)`);
+      if (mode === 'aggressive' && psnr < 25) {
+        throw new Error(`[ASSERTION FAILED] Aggressive mode visual drift on community asset exceeded threshold (PSNR: ${psnr.toFixed(2)} dB, expected >= 25 dB)`);
       }
 
       communityResults.push({
