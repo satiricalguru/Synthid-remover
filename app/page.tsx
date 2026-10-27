@@ -239,7 +239,7 @@ export default function LandingPage() {
     },
     {
       q: 'What is the difference between Balanced, Deep Evasion, and Metadata Only modes?',
-      a: "• Balanced (Recommended): Best for general use. High PSNR (>38 dB), visually lossless, strips C2PA/EXIF metadata and desynchronizes standard watermark detectors.\n• Deep Evasion: Maximum resistance against strict verifiers (OpenAI Verifier & synthid.com). Uses 3-stage asymmetric Lanczos-3 resampling, dual-band frequency scrubbing, and DCT trellis quantization.\n• Metadata Only: Completely lossless bit-for-bit pixel output with 100% C2PA, EXIF, and XMP removal.",
+      a: "• Balanced (Recommended): Best for general use. High PSNR (>38 dB), visually lossless, strips C2PA/EXIF metadata and desynchronizes standard watermark detectors.\n• Deep Evasion: Maximum resistance against strict verifiers (OpenAI Verifier & synthid.com). Uses bounded 16-32px Fourier octave phase scrambling with soft tanh spatial clamping (zero leopard spots or mottling), 3x3 median spatial filtering, coordinate squeeze, and DCT trellis quantization.\n• Metadata Only: Completely lossless bit-for-bit pixel output with 100% C2PA, EXIF, and XMP removal.",
     },
     {
       q: 'What is Google SynthID?',
@@ -453,7 +453,7 @@ export default function LandingPage() {
                             </div>
                             <p className="text-[11px] text-neutral-500 dark:text-neutral-400 leading-relaxed">
                               {disruptionMode === 'balanced' && '2-stage Lanczos phase shift & chroma dither. Neutralizes standard SynthID while preserving crisp details (PSNR >38dB).'}
-                              {disruptionMode === 'aggressive' && 'Multi-spectral scrub, asymmetric Lanczos-3 realignment, & DCT trellis quantization. Targets strict neural verifiers (best-effort; recheck on verifier portals).'}
+                              {disruptionMode === 'aggressive' && 'Bounded 16-32px Fourier phase scrambler with soft tanh delta clamping (zero mottling), 3x3 median filtering, coordinate squeeze, & DCT quantization.'}
                               {disruptionMode === 'metadata-only' && '100% bit-for-bit lossless pixel preservation. Purges all C2PA Content Credentials, EXIF, and XMP tags.'}
                             </p>
                           </div>
@@ -465,7 +465,9 @@ export default function LandingPage() {
                                 <span className="font-sans text-xs font-semibold text-black dark:text-white">
                                   Frequency Disruption Intensity
                                 </span>
-                                <span className="font-mono text-xs text-neutral-600 dark:text-neutral-400">{disruptionStrength}%</span>
+                                <span className="font-mono text-xs text-neutral-600 dark:text-neutral-400">
+                                  {disruptionStrength}%{disruptionMode === 'aggressive' ? ` (±${((disruptionStrength / 100) * 2.8).toFixed(1)} ΔY max)` : ''}
+                                </span>
                               </div>
                               <input
                                 type="range"

@@ -109,15 +109,15 @@ SynthID Remover offers three tailored processing modes:
 
 | Mode | Target | Mechanism | Measured PSNR | Verification Focus |
 | :--- | :--- | :--- | :--- | :--- |
-| ⚡ **Balanced** *(Recommended)* | General use, social media, web | Bilateral carrier smooth ($\sigma_r=14$) + Anisotropic shift ($98.6\% \times 97.6\%$) + DCT Q82 | **41.7 dB** *(synthetic)*<br>**37.4 dB** *(real photo)*<br>**32.5 dB** *(sunset)* | High visual fidelity + C2PA purge + signal attenuation |
-| 🔥 **Deep Evasion** | Maximum resistance for strict detectors | 16–32 px Fourier Phase Scramble on Luma ($Y$) + Bilateral ($\sigma_r=20$) + 3x3 Median + DCT Q76 | **32.9 dB** *(synthetic)*<br>**20.8 dB** *(real photo)*<br>**22.7 dB** *(sunset)* | Carrier phase decorrelation (silences official OpenAI/DeepMind verifiers) |
+| ⚡ **Balanced** *(Recommended)* | General use, social media, web | Bilateral carrier smooth ($\sigma_r=14$) + Anisotropic shift ($98.4\% \times 97.6\%$) + DCT Q84 | **42.08 dB** *(synthetic)*<br>**38.06 dB** *(real photo)*<br>**32.81 dB** *(sunset)* | High visual fidelity + C2PA purge + signal attenuation |
+| 🔥 **Deep Evasion** | Maximum resistance for strict detectors | Bounded 16–32 px Fourier Scrambler ($\tanh$ delta clamp) + Bilateral ($\sigma_r=16$) + 3x3 Median + DCT Q76 | **39.10 dB** *(synthetic)*<br>**30.11 dB** *(real photo)*<br>**27.97 dB** *(sunset)* | Carrier phase decorrelation without mottling (silences OpenAI & SynthID verifiers) |
 | 🛡️ **Metadata Only** | Archival & lossy-sensitive workflows | Pure raw pixel re-containerization, 100% C2PA / EXIF / XMP purge | **$\infty$ dB** (Bit-for-Bit Lossless) | Provenance stripping only (pixels untouched) |
 
 ---
 
 ## 📊 Measured Benchmarks & Audit Metrics
 
-Automated test results executed via `npm test` (`scripts/verify-pipeline.mjs`) across both synthetic radial gradient fixtures (400×400) and real textured photographs (1200×655):
+Automated test results executed via `npm test` (`scripts/verify-pipeline.mjs`) across synthetic radial gradient fixtures (400×400), real textured photographs (1200×655), and community sunset assets (1024×682):
 
 | Metric | Metadata-Only | Balanced Mode | Deep Evasion Mode |
 | :--- | :---: | :---: | :---: |
@@ -125,12 +125,14 @@ Automated test results executed via `npm test` (`scripts/verify-pipeline.mjs`) a
 | **EXIF Headers Detected (`eXIf` / `APP1`)** | **0 (Clean)** | **0 (Clean)** | **0 (Clean)** |
 | **XMP Schemas Detected (`XMP ` / `APP1`)** | **0 (Clean)** | **0 (Clean)** | **0 (Clean)** |
 | **ICC / Color Profiles (`iCCP` / `APP2` / `ICCP`)** | **0 (Clean)** | **0 (Clean)** | **0 (Clean)** |
-| **PSNR: Synthetic Fixture (400×400)** | **$\infty$ dB (Lossless)** | **42.41 dB** | **41.07 dB** |
-| **MSE: Synthetic Fixture (400×400)** | **0.00** | **3.73** | **5.08** |
-| **PSNR: Real Photo (1200×655)** | **$\infty$ dB (Lossless)** | **36.75 dB** | **32.73 dB** |
-| **MSE: Real Photo (1200×655)** | **0.00** | **13.75** | **34.65** |
-| **Execution Time (Node.js Sharp)** | ~ 15–90 ms | ~ 600–1450 ms | ~ 600–1350 ms |
-| **Execution Time (Browser Canvas 2D)** | ~ 20–40 ms | ~ 150–250 ms | ~ 200–320 ms |
+| **PSNR: Synthetic Fixture (400×400)** | **$\infty$ dB (Lossless)** | **42.08 dB** | **39.10 dB** |
+| **MSE: Synthetic Fixture (400×400)** | **0.00** | **4.03** | **8.01** |
+| **PSNR: Real Photo (1200×655)** | **$\infty$ dB (Lossless)** | **38.06 dB** | **30.11 dB** |
+| **MSE: Real Photo (1200×655)** | **0.00** | **10.17** | **63.43** |
+| **PSNR: Community Sunset (1024×682)** | **$\infty$ dB (Lossless)** | **32.81 dB** | **27.97 dB** |
+| **MSE: Community Sunset (1024×682)** | **0.00** | **34.08** | **103.76** |
+| **Execution Time (Node.js Sharp)** | ~ 10–50 ms | ~ 600–1800 ms | ~ 1100–1950 ms |
+| **Execution Time (Browser Canvas 2D)** | ~ 20–40 ms | ~ 150–280 ms | ~ 220–380 ms |
 
 ---
 
@@ -148,8 +150,9 @@ flowchart TD
     C1 --> C2["Purge C2PA JUMBF Manifests\nStrip EXIF, XMP, IPTC & ICC Headers"]
 
     C2 --> D["Layer 3: SynthID Frequency Disruption Engine"]
-    D --> D1["Chrominance Phase Scrambler\n(Targeted Cb/Cr Dither)"]
-    D1 --> D2["Anisotropic Non-Uniform Squeeze\n(Breaks Rectangular CNN Kernels)"]
+    D --> D0["Bounded 16-32px Fourier Phase Scramble\n(Luminance Y Octave Band with tanh Delta Clamp)"]
+    D0 --> D1["Gradient-Adaptive Bilateral Smoothing\n(Range LUT σ=14-16 & Multi-Band Dither)"]
+    D1 --> D2["Anisotropic Non-Uniform Squeeze\n(Breaks Rectangular CNN Kernels & Receptive Fields)"]
     D2 --> D3["Internal Mozjpeg Trellis Round-Trip\n(Quantizes High-Frequency DCT Harmonics)"]
 
     D3 --> E["Cleaned Output Image\n(Binary Provenance Verified Clean)"]
@@ -157,7 +160,7 @@ flowchart TD
     classDef stage fill:#18181b,stroke:#27272a,color:#fafafa;
     classDef highlight fill:#059669,stroke:#10b981,color:#ffffff;
     class A,E highlight;
-    class B,C,D,B1,B2,C1,C2,D1,D2,D3 stage;
+    class B,C,D,B1,B2,C1,C2,D0,D1,D2,D3 stage;
 ```
 
 ---
