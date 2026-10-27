@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 320" width="1280" height="320">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#059669"/><stop offset="1" stop-color="#0284c7"/>
+    </linearGradient>
+    <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1.5" fill="#fff" opacity=".12"/>
+    </pattern>
+  </defs>
+  <rect width="1280" height="320" rx="24" fill="url(#g)"/>
+  <rect width="1280" height="320" rx="24" fill="url(#dots)"/>
+  <circle cx="1130" cy="60" r="140" fill="#fff" opacity=".08"/>
+  <circle cx="1210" cy="290" r="90" fill="#fff" opacity=".06"/>
+  <text x="80" y="170" font-family="Inter,Segoe UI,Helvetica,Arial,sans-serif" font-size="84" font-weight="800" fill="#fff">SynthID Remover</text>
+  <text x="84" y="225" font-family="Inter,Segoe UI,Helvetica,Arial,sans-serif" font-size="30" fill="#fff" opacity=".9">Realtime AI Watermark &amp; C2PA Provenance Neutralizer</text>
+</svg>
