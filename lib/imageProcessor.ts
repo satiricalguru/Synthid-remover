@@ -491,8 +491,8 @@ export async function disruptEmbeddedSignals(
   // 3. Resampling with cubic interpolation prevents mathematical reconstruction of carrier.
   const squeezeX = mode === 'aggressive' ? 0.970 : 0.984;
   const squeezeY = mode === 'aggressive' ? 0.960 : 0.976;
-  const squeezeW = Math.max(16, Math.round(width * squeezeX));
-  const squeezeH = Math.max(16, Math.round(height * squeezeY));
+  const squeezeW = Math.max(1, Math.min(width, Math.round(width * squeezeX)));
+  const squeezeH = Math.max(1, Math.min(height, Math.round(height * squeezeY)));
 
   let currentSharp = sharp(Buffer.from(disruptedPixels.buffer, disruptedPixels.byteOffset, disruptedPixels.byteLength), {
     raw: {
@@ -502,7 +502,7 @@ export async function disruptEmbeddedSignals(
     },
   });
 
-  if (mode === 'aggressive') {
+  if (mode === 'aggressive' && width >= 3 && height >= 3) {
     currentSharp = currentSharp.median(3);
   }
 
@@ -583,33 +583,102 @@ export async function applyInpaintMask(
   const width = baseMeta.width || 800;
   const height = baseMeta.height || 600;
 
-  // Prepare smooth inpainted patch: blend median/texture reconstruction with soft blur
-  const blurredPatch = await sharp(imageBuffer)
+  // 1. Extract raw RGBA pixels from base image
+  const { data: rawPixels } = await sharp(imageBuffer)
     .resize(width, height, { fit: 'fill' })
-    .median(5)
-    .blur(14)
-    .toBuffer();
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
 
-  // Extract mask luminance and convert to RGBA alpha channel with soft edge falloff
-  const { data: monoData, info } = await sharp(maskBuffer)
+  // 2. Extract mask luminance
+  const { data: monoData } = await sharp(maskBuffer)
     .resize(width, height, { fit: 'fill' })
     .toColourspace('b-w')
     .raw()
     .toBuffer({ resolveWithObject: true });
 
-  const rgbaData = new Uint8Array(info.width * info.height * 4);
+  // 3. Find bounding box of mask & sample surrounding boundary pixels
+  let minX = width, maxX = 0, minY = height, maxY = 0;
+  let hasMask = false;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (monoData[y * width + x] > 30) {
+        hasMask = true;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  const patchPixels = new Uint8Array(rawPixels);
+  if (hasMask) {
+    // Collect perimeter pixels outside the mask bounding box to compute background color
+    let rSum = 0, gSum = 0, bSum = 0, count = 0;
+    const borderPad = 6;
+    const scanMinX = Math.max(0, minX - borderPad);
+    const scanMaxX = Math.min(width - 1, maxX + borderPad);
+    const scanMinY = Math.max(0, minY - borderPad);
+    const scanMaxY = Math.min(height - 1, maxY + borderPad);
+
+    for (let y = scanMinY; y <= scanMaxY; y++) {
+      for (let x = scanMinX; x <= scanMaxX; x++) {
+        const mIdx = y * width + x;
+        if (monoData[mIdx] <= 20) {
+          const pIdx = mIdx * 4;
+          rSum += rawPixels[pIdx];
+          gSum += rawPixels[pIdx + 1];
+          bSum += rawPixels[pIdx + 2];
+          count++;
+        }
+      }
+    }
+
+    const avgR = count > 0 ? Math.round(rSum / count) : 128;
+    const avgG = count > 0 ? Math.round(gSum / count) : 128;
+    const avgB = count > 0 ? Math.round(bSum / count) : 128;
+
+    // Seed masked region in patchPixels with background color to eliminate watermark remnants
+    for (let y = minY; y <= maxY; y++) {
+      for (let x = minX; x <= maxX; x++) {
+        const mIdx = y * width + x;
+        if (monoData[mIdx] > 30) {
+          const pIdx = mIdx * 4;
+          patchPixels[pIdx] = avgR;
+          patchPixels[pIdx + 1] = avgG;
+          patchPixels[pIdx + 2] = avgB;
+        }
+      }
+    }
+  }
+
+  // Smooth blur on the seeded patch for seamless boundary transition
+  const blurredPatch = await sharp(Buffer.from(patchPixels.buffer, patchPixels.byteOffset, patchPixels.byteLength), {
+    raw: {
+      width,
+      height,
+      channels: 4,
+    },
+  })
+    .blur(12)
+    .png()
+    .toBuffer();
+
+  // Convert mask luminance to RGBA alpha channel with soft edge falloff
+  const rgbaData = new Uint8Array(width * height * 4);
   for (let i = 0, j = 0; i < monoData.length; i++, j += 4) {
     const intensity = monoData[i];
     rgbaData[j] = 255;
     rgbaData[j + 1] = 255;
     rgbaData[j + 2] = 255;
-    rgbaData[j + 3] = intensity; // Set alpha channel = luminance intensity
+    rgbaData[j + 3] = intensity; // Alpha channel = luminance intensity
   }
 
   const alphaMask = await sharp(rgbaData, {
     raw: {
-      width: info.width,
-      height: info.height,
+      width,
+      height,
       channels: 4,
     },
   })
@@ -750,9 +819,10 @@ export async function processImagePipeline(
     logs.push(`[PROCESS] Applying chrominance phase shift and anisotropic Lanczos-3 grid realignment...`);
     logs.push(`[PROCESS] Performing internal Mozjpeg trellis DCT quantization cycle...`);
 
+    const targetFormat = options.targetFormat || 'png';
     currentBuffer = await disruptEmbeddedSignals(
       currentBuffer,
-      options.targetFormat || 'webp',
+      targetFormat,
       options.quality || 95,
       disruptionMode,
       disruptionStrength

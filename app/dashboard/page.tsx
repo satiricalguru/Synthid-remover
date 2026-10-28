@@ -30,7 +30,7 @@ export default function DashboardPage() {
   };
 
   const totalProcessed = history.length;
-  const totalSavedBytes = history.reduce((acc, job) => acc + (job.originalSize - job.processedSize), 0);
+  const totalSavedBytes = history.reduce((acc, job) => acc + Math.max(0, job.originalSize - job.processedSize), 0);
 
   return (
     <div className="min-h-screen bg-white text-black dark:bg-black dark:text-white py-12">

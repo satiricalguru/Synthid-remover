@@ -96,7 +96,8 @@ export default function LandingPage() {
         formData.append('removeVisibleBadge', String(removeVisibleBadge));
         formData.append('format', exportFormat);
 
-        const res = await fetch('/api/process', {
+        const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '';
+        const res = await fetch(`${basePath}/api/process`, {
           method: 'POST',
           body: formData,
         });
@@ -174,8 +175,10 @@ export default function LandingPage() {
         const formData = new FormData();
         formData.append('image', selectedFile);
         formData.append('mask', maskBlob, 'mask.png');
+        formData.append('format', exportFormat);
 
-        const res = await fetch('/api/inpaint', {
+        const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '';
+        const res = await fetch(`${basePath}/api/inpaint`, {
           method: 'POST',
           body: formData,
         });
@@ -189,7 +192,7 @@ export default function LandingPage() {
 
       // If backend route is not available (e.g. GitHub Pages static site), run client inpaint fallback
       if (!data || !data.success) {
-        data = await inpaintImageClientSide(selectedFile, maskBlob);
+        data = await inpaintImageClientSide(selectedFile, maskBlob, exportFormat);
       }
 
       setProcessedImageUrl(data.base64Image);

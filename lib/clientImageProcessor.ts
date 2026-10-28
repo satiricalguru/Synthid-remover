@@ -47,7 +47,7 @@ export function scanBase64Provenance(base64Data: string): ClientProvenanceAudit 
     format = 'PNG';
     let offset = 8;
     while (offset + 8 <= bytes.length) {
-      const chunkLen = (bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3];
+      const chunkLen = (((bytes[offset] << 24) >>> 0) + (bytes[offset + 1] << 16) + (bytes[offset + 2] << 8) + bytes[offset + 3]) >>> 0;
       const chunkType = String.fromCharCode(bytes[offset + 4], bytes[offset + 5], bytes[offset + 6], bytes[offset + 7]);
 
       if (chunkType === 'caBX') c2pa = true;
@@ -76,6 +76,7 @@ export function scanBase64Provenance(base64Data: string): ClientProvenanceAudit 
       const marker = bytes[offset + 1];
       if (marker === 0xda || marker === 0xd9) break;
       const markerLen = (bytes[offset + 2] << 8) | bytes[offset + 3];
+      if (markerLen < 2) break;
 
       if (marker === 0xe1) {
         let payload = '';
@@ -99,7 +100,7 @@ export function scanBase64Provenance(base64Data: string): ClientProvenanceAudit 
     let offset = 12;
     while (offset + 8 <= bytes.length) {
       const chunkId = String.fromCharCode(bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]);
-      const chunkLen = bytes[offset + 4] | (bytes[offset + 5] << 8) | (bytes[offset + 6] << 16) | (bytes[offset + 7] << 24);
+      const chunkLen = (bytes[offset + 4] | (bytes[offset + 5] << 8) | (bytes[offset + 6] << 16) | ((bytes[offset + 7] << 24) >>> 0)) >>> 0;
 
       if (chunkId === 'EXIF') exif = true;
       if (chunkId === 'XMP ') xmp = true;
@@ -581,7 +582,8 @@ export async function processImageClientSide(
  */
 export async function inpaintImageClientSide(
   imageFile: File,
-  maskBlob: Blob
+  maskBlob: Blob,
+  format: 'jpeg' | 'png' | 'webp' = 'png'
 ): Promise<{ base64Image: string; telemetry: any }> {
   const startTime = Date.now();
   const logs: string[] = [];
@@ -641,7 +643,7 @@ export async function inpaintImageClientSide(
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const idx = (y * width + x) * 4;
-      if (mask[idx + 3] > 20 || mask[idx] > 20) {
+      if (mask[idx + 3] > 20 && mask[idx] > 20) {
         if (x < minX) minX = x;
         if (x > maxX) maxX = x;
         if (y < minY) minY = y;
@@ -656,16 +658,29 @@ export async function inpaintImageClientSide(
   maxX = Math.min(width - 1, maxX + pad);
   maxY = Math.min(height - 1, maxY + pad);
 
-  // Multi-pass boundary pixel diffusion
-  const passes = 4;
-  for (let pass = 0; pass < passes; pass++) {
+  // Track resolved status for pixels: 1 = masked (unresolved), 0 = known / resolved
+  const resolved = new Uint8Array(width * height);
+  let totalMasked = 0;
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      const idx = (y * width + x) * 4;
+      if (mask[idx + 3] > 30 && mask[idx] > 30) {
+        resolved[y * width + x] = 1;
+        totalMasked++;
+      }
+    }
+  }
+
+  const maskRadius = Math.max((maxX - minX), (maxY - minY)) / 2;
+  const passes = Math.max(6, Math.min(32, Math.ceil(maskRadius / 2)));
+
+  // Multi-pass boundary pixel diffusion with propagation
+  for (let pass = 0; pass < passes && totalMasked > 0; pass++) {
+    const newlyResolved: number[] = [];
     for (let y = minY; y <= maxY; y++) {
       for (let x = minX; x <= maxX; x++) {
-        const idx = (y * width + x) * 4;
-        const maskAlpha = mask[idx + 3];
-        const maskLum = mask[idx];
-
-        if (maskAlpha > 30 || maskLum > 30) {
+        const coord = y * width + x;
+        if (resolved[coord] === 1) {
           let rSum = 0, gSum = 0, bSum = 0, count = 0;
           const radius = 3;
           for (let dy = -radius; dy <= radius; dy++) {
@@ -674,9 +689,10 @@ export async function inpaintImageClientSide(
             for (let dx = -radius; dx <= radius; dx++) {
               const nx = x + dx;
               if (nx < 0 || nx >= width) continue;
-              const nidx = (ny * width + nx) * 4;
-              if (mask[nidx + 3] <= 30 && mask[nidx] <= 30) {
+              const nCoord = ny * width + nx;
+              if (resolved[nCoord] === 0) {
                 const weight = 1 / (1 + Math.hypot(dx, dy));
+                const nidx = nCoord * 4;
                 rSum += src[nidx] * weight;
                 gSum += src[nidx + 1] * weight;
                 bSum += src[nidx + 2] * weight;
@@ -685,13 +701,19 @@ export async function inpaintImageClientSide(
             }
           }
           if (count > 0) {
+            const idx = coord * 4;
             src[idx] = Math.round(rSum / count);
             src[idx + 1] = Math.round(gSum / count);
             src[idx + 2] = Math.round(bSum / count);
+            newlyResolved.push(coord);
           }
         }
       }
     }
+    for (const coord of newlyResolved) {
+      resolved[coord] = 0;
+    }
+    totalMasked -= newlyResolved.length;
   }
 
   ctx.putImageData(imgData, 0, 0);
@@ -699,7 +721,8 @@ export async function inpaintImageClientSide(
   logs.push(`[CLIENT INPAINT] Reconstructed patch composited smoothly.`);
   logs.push(`[SUCCESS] Wiped C2PA Content Credentials and EXIF metadata.`);
 
-  const base64Image = canvas.toDataURL('image/webp', 0.95);
+  const mimeType = format === 'jpeg' ? 'image/jpeg' : format === 'webp' ? 'image/webp' : 'image/png';
+  const base64Image = canvas.toDataURL(mimeType, 0.95);
   const provenanceAudit = scanBase64Provenance(base64Image);
   const executionTimeMs = Date.now() - startTime;
   logs.push(`[COMPLETE] Client inpainting finished in ${executionTimeMs}ms.`);

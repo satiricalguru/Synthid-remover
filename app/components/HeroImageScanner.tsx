@@ -45,6 +45,14 @@ export const HeroImageScanner: React.FC = () => {
     setSliderPos(percentage);
   };
 
+  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (!containerRef.current || e.touches.length === 0) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const x = e.touches[0].clientX - rect.left;
+    const percentage = Math.max(0, Math.min(100, (x / rect.width) * 100));
+    setSliderPos(percentage);
+  };
+
   return (
     <div className="relative rounded-2xl border border-neutral-800 bg-neutral-950 p-4 shadow-2xl overflow-hidden">
       {/* Scanner Header */}
@@ -65,7 +73,10 @@ export const HeroImageScanner: React.FC = () => {
         onMouseEnter={() => setIsHovering(true)}
         onMouseLeave={() => setIsHovering(false)}
         onMouseMove={handleMouseMove}
-        className="relative h-72 w-full overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900 select-none cursor-ew-resize group"
+        onTouchStart={() => setIsHovering(true)}
+        onTouchEnd={() => setIsHovering(false)}
+        onTouchMove={handleTouchMove}
+        className="relative h-72 w-full overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900 select-none cursor-ew-resize group touch-none"
       >
         {/* Base Layer: Image WITH Watermark */}
         <div className="absolute inset-0 bg-black">

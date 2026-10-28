@@ -37,12 +37,12 @@ export function saveLocalJob(job: Omit<LocalJobRecord, 'id' | 'timestamp'>): Loc
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
     } catch {
-      // If browser 5MB localStorage quota is reached, strip previewUrls from older records
-      updated = updated.map((r, idx) => (idx === 0 ? r : { ...r, previewUrl: undefined }));
+      // Step 1: If browser 5MB quota reached, strip previewUrls from older records first (keep newest 3)
+      updated = updated.map((r, idx) => (idx < 3 ? r : { ...r, previewUrl: undefined }));
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
       } catch {
-        // If still over quota, strip previewUrl from all records to preserve job telemetry logs
+        // Step 2: If still over quota, strip previewUrl from all records to preserve essential job telemetry logs
         updated = updated.map((r) => ({ ...r, previewUrl: undefined }));
         try {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));

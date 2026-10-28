@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "tsx scripts/verify-pipeline.mjs"
+    "test": "tsx scripts/verify-pipeline.mjs",
+    "test:edge": "tsx scripts/test-edge-cases.mjs",
+    "test:all": "tsx scripts/verify-pipeline.mjs && tsx scripts/test-edge-cases.mjs"
   },
   "dependencies": {
     "@pilio/gemini-watermark-remover": "^1.0.31",

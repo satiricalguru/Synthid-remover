@@ -6,6 +6,7 @@ export async function POST(req: NextRequest) {
     const formData = await req.formData();
     const imageFile = formData.get('image') as File | null;
     const maskFile = formData.get('mask') as File | null;
+    const format = (formData.get('format') as 'jpeg' | 'png' | 'webp') || 'png';
 
     if (!imageFile || !maskFile) {
       return NextResponse.json(
@@ -28,19 +29,21 @@ export async function POST(req: NextRequest) {
     logs.push(`[INPAINT] Reconstructed underlying visual details via spatial neighborhood blending.`);
 
     // Wipe metadata as standard baseline
-    inpaintedBuffer = await stripMetadata(inpaintedBuffer);
+    inpaintedBuffer = await stripMetadata(inpaintedBuffer, format);
     logs.push(`[SUCCESS] Wiped C2PA Content Credentials & EXIF headers.`);
 
     // Optional SynthID signal disruption post-inpaint
-    inpaintedBuffer = await disruptEmbeddedSignals(inpaintedBuffer, 'webp', 95);
+    inpaintedBuffer = await disruptEmbeddedSignals(inpaintedBuffer, format, 95);
     logs.push(`[SUCCESS] Disrupting frequency signals on final composite.`);
 
     const executionTimeMs = Date.now() - startTime;
-    const base64Image = `data:image/webp;base64,${inpaintedBuffer.toString('base64')}`;
+    const mimeType = format === 'jpeg' ? 'image/jpeg' : format === 'webp' ? 'image/webp' : 'image/png';
+    const base64Image = `data:${mimeType};base64,${inpaintedBuffer.toString('base64')}`;
 
     return NextResponse.json({
       success: true,
       filename: imageFile.name,
+      format,
       base64Image,
       telemetry: {
         originalSize: imageBuffer.length,

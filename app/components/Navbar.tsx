@@ -33,7 +33,7 @@ export const Navbar: React.FC = () => {
       <div className="mx-auto flex h-full max-w-6xl items-center justify-between px-4 sm:px-6">
         {/* Left Section: Brand & Nav Links */}
         <div className="flex items-center gap-8">
-          <Link href={`${basePath}/`} className="group flex items-center gap-2.5 transition-opacity hover:opacity-90">
+          <Link href="/" className="group flex items-center gap-2.5 transition-opacity hover:opacity-90">
             <div className="relative flex h-5 w-5 items-center justify-center rounded border border-black bg-white dark:border-white dark:bg-black transition-transform duration-300 group-hover:scale-105">
               <span className="h-2 w-2 rounded-xs bg-black dark:bg-white" />
             </div>
@@ -69,7 +69,7 @@ export const Navbar: React.FC = () => {
             >
               Capabilities
             </a>
-            <Link href={`${basePath}/dashboard`} className="flex items-center gap-1.5 transition-colors hover:text-black dark:hover:text-white">
+            <Link href="/dashboard" className="flex items-center gap-1.5 transition-colors hover:text-black dark:hover:text-white">
               <History className="h-3.5 w-3.5" />
               History
             </Link>
